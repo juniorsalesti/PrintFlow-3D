@@ -12,6 +12,7 @@ import {
   Upload,
 } from 'lucide-react';
 import { useErp } from '../../context/ErpContext';
+import { formatFirestoreErrorMessage } from '../../lib/firebase';
 import { deleteProduct, saveProduct } from '../../services/erpService';
 import { uploadCompanyFile } from '../../services/storageService';
 import type { Product } from '../../types/erp';
@@ -21,6 +22,7 @@ import {
   formatGrams,
   formatMinutesToHours,
   formatNumber,
+  toDateObject,
 } from '../../utils/formatters';
 import {
   ConfirmModal,
@@ -65,6 +67,7 @@ export const ProductsModule: React.FC = () => {
   const [editing, setEditing] = useState<Product | null>(null);
   const [form, setForm] = useState(emptyProductForm);
   const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [uploadingModel, setUploadingModel] = useState(false);
 
@@ -79,23 +82,30 @@ export const ProductsModule: React.FC = () => {
 
   const filteredProducts = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return products.filter((p) => {
-      if (filterStatus !== 'todos' && p.status !== filterStatus) return false;
-      if (filterType === 'catalogo' && p.isCustom) return false;
-      if (filterType === 'personalizado' && !p.isCustom) return false;
-      if (!term) return true;
-      return (
-        p.name.toLowerCase().includes(term) ||
-        p.sku.toLowerCase().includes(term) ||
-        p.category.toLowerCase().includes(term) ||
-        p.material.toLowerCase().includes(term)
-      );
-    });
+    return products
+      .filter((p) => {
+        if (filterStatus !== 'todos' && p.status !== filterStatus) return false;
+        if (filterType === 'catalogo' && p.isCustom) return false;
+        if (filterType === 'personalizado' && !p.isCustom) return false;
+        if (!term) return true;
+        return (
+          p.name.toLowerCase().includes(term) ||
+          p.sku.toLowerCase().includes(term) ||
+          p.category.toLowerCase().includes(term) ||
+          p.material.toLowerCase().includes(term)
+        );
+      })
+      .sort((a, b) => {
+        const ta = toDateObject(a.createdAt)?.getTime() || 0;
+        const tb = toDateObject(b.createdAt)?.getTime() || 0;
+        return tb - ta;
+      });
   }, [products, search, filterStatus, filterType]);
 
   const openCreate = () => {
     const defaultPrinter = printers[0];
     setEditing(null);
+    setFormError(null);
     setForm({
       ...emptyProductForm,
       recommendedPrinterId: defaultPrinter?.id || '',
@@ -106,6 +116,7 @@ export const ProductsModule: React.FC = () => {
 
   const openEdit = (p: Product) => {
     setEditing(p);
+    setFormError(null);
     setForm({
       name: p.name,
       sku: p.sku,
@@ -163,9 +174,17 @@ export const ProductsModule: React.FC = () => {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant) return;
+    setFormError(null);
+    if (!tenant) {
+      const msg = 'Sessão da empresa não inicializada. Recarregue a página e tente novamente.';
+      setFormError(msg);
+      showToast(msg, 'error');
+      return;
+    }
     if (!form.name.trim()) {
-      showToast('Informe o nome do produto.', 'error');
+      const msg = 'Informe o nome do produto.';
+      setFormError(msg);
+      showToast(msg, 'error');
       return;
     }
     setSaving(true);
@@ -183,7 +202,9 @@ export const ProductsModule: React.FC = () => {
       showToast(editing ? 'Produto atualizado.' : 'Produto cadastrado.');
       setModalOpen(false);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao salvar produto.', 'error');
+      const msg = formatFirestoreErrorMessage(err, 'Erro ao salvar produto.');
+      setFormError(msg);
+      showToast(msg, 'error');
     } finally {
       setSaving(false);
     }
@@ -197,7 +218,7 @@ export const ProductsModule: React.FC = () => {
       showToast('Produto excluído.');
       setDeleteTarget(null);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao excluir produto.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao excluir produto.'), 'error');
     } finally {
       setDeleting(false);
     }
@@ -497,11 +518,11 @@ export const ProductsModule: React.FC = () => {
               <label className={labelClass}>Peso estimado (gramas)</label>
               <input
                 type="number"
-                step="0.1"
+                step="any"
                 min="0"
                 value={form.estimatedWeightGrams}
                 onChange={(e) =>
-                  setForm({ ...form, estimatedWeightGrams: Number(e.target.value) })
+                  setForm({ ...form, estimatedWeightGrams: Math.max(0, Number(e.target.value) || 0) })
                 }
                 className={inputClass}
               />
@@ -511,11 +532,11 @@ export const ProductsModule: React.FC = () => {
               <label className={labelClass}>Comprimento estimado (metros - opcional)</label>
               <input
                 type="number"
-                step="0.1"
+                step="any"
                 min="0"
                 value={form.estimatedLengthMeters}
                 onChange={(e) =>
-                  setForm({ ...form, estimatedLengthMeters: Number(e.target.value) })
+                  setForm({ ...form, estimatedLengthMeters: Math.max(0, Number(e.target.value) || 0) })
                 }
                 className={inputClass}
               />
@@ -649,6 +670,12 @@ export const ProductsModule: React.FC = () => {
               />
             </div>
           </div>
+
+          {formError && (
+            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-400">
+              {formError}
+            </div>
+          )}
 
           <div className="flex items-center justify-end gap-3 pt-2">
             <button

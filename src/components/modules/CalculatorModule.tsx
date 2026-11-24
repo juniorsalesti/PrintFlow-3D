@@ -9,6 +9,7 @@ import {
   Save,
 } from 'lucide-react';
 import { useErp } from '../../context/ErpContext';
+import { formatFirestoreErrorMessage } from '../../lib/firebase';
 import { convertQuoteToOrder, saveQuote } from '../../services/erpService';
 import type { QuoteItem } from '../../types/erp';
 import {
@@ -204,7 +205,10 @@ export const CalculatorModule: React.FC = () => {
   };
 
   const handleSaveSimulationOrQuote = async (isSimulation: boolean) => {
-    if (!tenant) return;
+    if (!tenant) {
+      showToast('Sessão da empresa não inicializada. Recarregue a página.', 'error');
+      return;
+    }
     if (!partName.trim()) {
       showToast('Informe o nome da peça antes de salvar.', 'error');
       return;
@@ -237,7 +241,7 @@ export const CalculatorModule: React.FC = () => {
           : 'Orçamento salvo com sucesso.'
       );
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao salvar.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao salvar.'), 'error');
     } finally {
       setSavingSim(false);
       setSavingQuote(false);
@@ -245,7 +249,10 @@ export const CalculatorModule: React.FC = () => {
   };
 
   const handleTransformIntoOrder = async () => {
-    if (!tenant) return;
+    if (!tenant) {
+      showToast('Sessão da empresa não inicializada. Recarregue a página.', 'error');
+      return;
+    }
     if (!partName.trim()) {
       showToast('Informe o nome da peça para gerar o pedido.', 'error');
       return;
@@ -302,7 +309,7 @@ export const CalculatorModule: React.FC = () => {
       showToast('Pedido e tarefa de produção gerados com sucesso!');
       setActiveSection('orders');
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao gerar pedido.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao gerar pedido.'), 'error');
     } finally {
       setConvertingOrder(false);
     }

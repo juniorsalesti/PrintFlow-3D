@@ -329,8 +329,8 @@ export const DurationInput: React.FC<{
       </div>
       <input
         type="number"
-        step={unit === 'horas' ? '0.1' : '1'}
-        min={unit === 'horas' ? (minMinutes > 0 ? '0.02' : '0') : String(minMinutes)}
+        step={unit === 'horas' ? 'any' : '1'}
+        min={unit === 'horas' ? (minMinutes > 0 ? '0.01' : '0') : String(minMinutes)}
         required={required}
         value={rawValue}
         onChange={(e) => handleChange(e.target.value)}

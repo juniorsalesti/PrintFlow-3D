@@ -614,7 +614,7 @@ service cloud.firestore {
     }
 
     match /companies/{companyId} {
-      allow get: if isSignedIn() && isValidId(companyId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow get: if isSignedIn() && isValidId(companyId) && (companyId == request.auth.uid || (resource != null && existing().ownerUid == request.auth.uid) || isAdmin());
       allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
       allow create: if isVerifiedUser() && isValidId(companyId) &&
         isValidCompany(incoming()) && isCreateTimestamps() &&
@@ -631,7 +631,7 @@ service cloud.firestore {
       allow delete: if isAdmin() && isValidId(companyId);
 
       match /members/{memberId} {
-        allow get: if isSignedIn() && isValidId(companyId) && isValidId(memberId) && (existing().ownerUid == request.auth.uid || isAdmin());
+        allow get: if isSignedIn() && isValidId(companyId) && isValidId(memberId) && (companyId == request.auth.uid || (resource != null && existing().ownerUid == request.auth.uid) || isAdmin());
         allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
         allow create: if isVerifiedUser() && isValidId(companyId) && isValidId(memberId) &&
           isValidCompanyMember(incoming()) && isCreateTimestamps() &&
@@ -650,7 +650,7 @@ service cloud.firestore {
     }
 
     match /settings/{companyId} {
-      allow get: if isSignedIn() && isValidId(companyId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow get: if isSignedIn() && isValidId(companyId) && (companyId == request.auth.uid || (resource != null && existing().ownerUid == request.auth.uid) || isAdmin());
       allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
       allow create: if isVerifiedUser() && isValidId(companyId) &&
         isValidSettings(incoming()) && isCreateTimestamps() &&
@@ -662,7 +662,8 @@ service cloud.firestore {
             incoming().diff(existing()).affectedKeys().hasOnly([
               'energyTariffPerKwh', 'defaultProfitMargin', 'defaultPaymentFeePercent',
               'defaultHourlyLaborRate', 'defaultPackagingCost', 'lowStockThresholdGrams',
-              'currency', 'materialTypes', 'expenseCategories', 'materialDensities', 'updatedAt'
+              'currency', 'orderCounter', 'quoteCounter', 'purchaseCounter',
+              'materialTypes', 'expenseCategories', 'materialDensities', 'updatedAt'
             ]) ||
             incoming().diff(existing()).affectedKeys().hasOnly(['orderCounter', 'updatedAt']) ||
             incoming().diff(existing()).affectedKeys().hasOnly(['quoteCounter', 'updatedAt']) ||
@@ -674,7 +675,7 @@ service cloud.firestore {
     }
 
     match /customers/{customerId} {
-      allow get: if isSignedIn() && isValidId(customerId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow get: if isSignedIn() && isValidId(customerId) && ((resource != null && existing().ownerUid == request.auth.uid) || isAdmin());
       allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
       allow create: if isVerifiedUser() && isValidId(customerId) &&
         isValidCustomer(incoming()) && isCreateTimestamps() &&
@@ -694,7 +695,7 @@ service cloud.firestore {
     }
 
     match /products/{productId} {
-      allow get: if isSignedIn() && isValidId(productId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow get: if isSignedIn() && isValidId(productId) && ((resource != null && existing().ownerUid == request.auth.uid) || isAdmin());
       allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
       allow create: if isVerifiedUser() && isValidId(productId) &&
         isValidProduct(incoming()) && isCreateTimestamps() &&
@@ -717,7 +718,7 @@ service cloud.firestore {
     }
 
     match /materials/{materialId} {
-      allow get: if isSignedIn() && isValidId(materialId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow get: if isSignedIn() && isValidId(materialId) && ((resource != null && existing().ownerUid == request.auth.uid) || isAdmin());
       allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
       allow create: if isVerifiedUser() && isValidId(materialId) &&
         isValidMaterial(incoming()) && isCreateTimestamps() &&
@@ -740,7 +741,7 @@ service cloud.firestore {
     }
 
     match /inventoryMovements/{movementId} {
-      allow get: if isSignedIn() && isValidId(movementId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow get: if isSignedIn() && isValidId(movementId) && ((resource != null && existing().ownerUid == request.auth.uid) || isAdmin());
       allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
       allow create: if isVerifiedUser() && isValidId(movementId) &&
         isValidInventoryMovement(incoming()) && isCreateTimestamps() &&
@@ -750,7 +751,7 @@ service cloud.firestore {
     }
 
     match /printers/{printerId} {
-      allow get: if isSignedIn() && isValidId(printerId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow get: if isSignedIn() && isValidId(printerId) && ((resource != null && existing().ownerUid == request.auth.uid) || isAdmin());
       allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
       allow create: if isVerifiedUser() && isValidId(printerId) &&
         isValidPrinter(incoming()) && isCreateTimestamps() &&
@@ -774,7 +775,7 @@ service cloud.firestore {
     }
 
     match /maintenanceRecords/{recordId} {
-      allow get: if isSignedIn() && isValidId(recordId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow get: if isSignedIn() && isValidId(recordId) && ((resource != null && existing().ownerUid == request.auth.uid) || isAdmin());
       allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
       allow create: if isVerifiedUser() && isValidId(recordId) &&
         isValidMaintenanceRecord(incoming()) && isCreateTimestamps() &&
@@ -789,7 +790,7 @@ service cloud.firestore {
     }
 
     match /quotes/{quoteId} {
-      allow get: if isSignedIn() && isValidId(quoteId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow get: if isSignedIn() && isValidId(quoteId) && ((resource != null && existing().ownerUid == request.auth.uid) || isAdmin());
       allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
       allow create: if isVerifiedUser() && isValidId(quoteId) &&
         isValidQuote(incoming()) && isCreateTimestamps() &&
@@ -811,7 +812,7 @@ service cloud.firestore {
     }
 
     match /orders/{orderId} {
-      allow get: if isSignedIn() && isValidId(orderId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow get: if isSignedIn() && isValidId(orderId) && ((resource != null && existing().ownerUid == request.auth.uid) || isAdmin());
       allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
       allow create: if isVerifiedUser() && isValidId(orderId) &&
         isValidOrder(incoming()) && isCreateTimestamps() &&
@@ -836,7 +837,7 @@ service cloud.firestore {
     }
 
     match /productionJobs/{jobId} {
-      allow get: if isSignedIn() && isValidId(jobId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow get: if isSignedIn() && isValidId(jobId) && ((resource != null && existing().ownerUid == request.auth.uid) || isAdmin());
       allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
       allow create: if isVerifiedUser() && isValidId(jobId) &&
         isValidProductionJob(incoming()) && isCreateTimestamps() &&
@@ -872,7 +873,7 @@ service cloud.firestore {
     }
 
     match /transactions/{transactionId} {
-      allow get: if isSignedIn() && isValidId(transactionId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow get: if isSignedIn() && isValidId(transactionId) && ((resource != null && existing().ownerUid == request.auth.uid) || isAdmin());
       allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
       allow create: if isVerifiedUser() && isValidId(transactionId) &&
         isValidTransaction(incoming()) && isCreateTimestamps() &&
@@ -891,7 +892,7 @@ service cloud.firestore {
     }
 
     match /expenses/{expenseId} {
-      allow get: if isSignedIn() && isValidId(expenseId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow get: if isSignedIn() && isValidId(expenseId) && ((resource != null && existing().ownerUid == request.auth.uid) || isAdmin());
       allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
       allow create: if isVerifiedUser() && isValidId(expenseId) &&
         isValidExpense(incoming()) && isCreateTimestamps() &&
@@ -910,7 +911,7 @@ service cloud.firestore {
     }
 
     match /suppliers/{supplierId} {
-      allow get: if isSignedIn() && isValidId(supplierId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow get: if isSignedIn() && isValidId(supplierId) && ((resource != null && existing().ownerUid == request.auth.uid) || isAdmin());
       allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
       allow create: if isVerifiedUser() && isValidId(supplierId) &&
         isValidSupplier(incoming()) && isCreateTimestamps() &&
@@ -928,7 +929,7 @@ service cloud.firestore {
     }
 
     match /purchases/{purchaseId} {
-      allow get: if isSignedIn() && isValidId(purchaseId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow get: if isSignedIn() && isValidId(purchaseId) && ((resource != null && existing().ownerUid == request.auth.uid) || isAdmin());
       allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
       allow create: if isVerifiedUser() && isValidId(purchaseId) &&
         isValidPurchase(incoming()) && isCreateTimestamps() &&
@@ -949,7 +950,7 @@ service cloud.firestore {
     }
 
     match /notifications/{notificationId} {
-      allow get: if isSignedIn() && isValidId(notificationId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow get: if isSignedIn() && isValidId(notificationId) && ((resource != null && existing().ownerUid == request.auth.uid) || isAdmin());
       allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
       allow create: if isVerifiedUser() && isValidId(notificationId) &&
         isValidNotification(incoming()) && isCreateTimestamps() &&

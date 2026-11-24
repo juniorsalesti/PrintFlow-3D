@@ -4,6 +4,7 @@ import {
   auth,
   checkAuthorizedDomain,
   firebaseAuthConsoleUrl,
+  formatFirestoreErrorMessage,
   googleProvider,
   type DomainAuthorizationCheck,
 } from '../lib/firebase';
@@ -68,6 +69,7 @@ interface ErpContextValue {
   recheckAuthorizedDomain: () => Promise<DomainAuthorizationCheck>;
   signInWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
+  retryBootstrap: () => Promise<void>;
   profile: UserProfile | null;
   company: Company | null;
   settings: CompanySettings | null;
@@ -213,6 +215,30 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setSettings(null);
   }, []);
 
+  const runBootstrap = useCallback(async (currentUser: User) => {
+    setBootstrapping(true);
+    setAuthError(null);
+    try {
+      const boot = await ensureCompanyBootstrap(currentUser);
+      setProfile(boot.profile);
+      setCompany(boot.company);
+      setSettings(boot.settings);
+    } catch (err) {
+      setProfile(null);
+      setCompany(null);
+      setSettings(null);
+      setAuthError(formatFirestoreErrorMessage(err, 'Erro ao inicializar empresa.'));
+    } finally {
+      setBootstrapping(false);
+      setAuthReady(true);
+    }
+  }, []);
+
+  const retryBootstrap = useCallback(async () => {
+    if (!auth.currentUser) return;
+    await runBootstrap(auth.currentUser);
+  }, [runBootstrap]);
+
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
@@ -225,23 +251,10 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return;
       }
 
-      setBootstrapping(true);
-      setAuthError(null);
-      try {
-        const boot = await ensureCompanyBootstrap(currentUser);
-        setProfile(boot.profile);
-        setCompany(boot.company);
-        setSettings(boot.settings);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Erro ao inicializar empresa.';
-        setAuthError(msg);
-      } finally {
-        setBootstrapping(false);
-        setAuthReady(true);
-      }
+      await runBootstrap(currentUser);
     });
     return () => unsub();
-  }, []);
+  }, [runBootstrap]);
 
   const tenant = useMemo<TenantContext | null>(() => {
     if (!profile || !company) return null;
@@ -431,6 +444,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     recheckAuthorizedDomain,
     signInWithGoogle,
     logout,
+    retryBootstrap,
     profile,
     company,
     settings,

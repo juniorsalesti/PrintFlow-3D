@@ -10,6 +10,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useErp } from '../../context/ErpContext';
+import { formatFirestoreErrorMessage } from '../../lib/firebase';
 import { convertQuoteToOrder, deleteQuote, saveQuote } from '../../services/erpService';
 import type { Quote, QuoteItem, QuoteStatus } from '../../types/erp';
 import { exportQuotePDF } from '../../utils/exporters';
@@ -19,6 +20,7 @@ import {
   formatBRL,
   formatDateBR,
   formatNumber,
+  toDateObject,
 } from '../../utils/formatters';
 import {
   ConfirmModal,
@@ -60,6 +62,7 @@ export const QuotesModule: React.FC = () => {
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState<QuoteItem[]>([]);
   const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const [convertTarget, setConvertTarget] = useState<Quote | null>(null);
   const [deliveryDate, setDeliveryDate] = useState(addDaysISO(7));
@@ -105,6 +108,7 @@ export const QuotesModule: React.FC = () => {
 
   const openCreate = () => {
     setEditing(null);
+    setFormError(null);
     setCustomerId('');
     setTitle('');
     setValidUntil(addDaysISO(15));
@@ -118,6 +122,7 @@ export const QuotesModule: React.FC = () => {
 
   const openEdit = (q: Quote) => {
     setEditing(q);
+    setFormError(null);
     setCustomerId(q.customerId);
     setTitle(q.title);
     setValidUntil(q.validUntil || addDaysISO(15));
@@ -177,23 +182,37 @@ export const QuotesModule: React.FC = () => {
 
   const filteredQuotes = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return quotes.filter((q) => {
-      if (!showSimulations && q.isSimulation) return false;
-      if (statusFilter !== 'todos' && q.status !== statusFilter) return false;
-      if (!term) return true;
-      return (
-        q.quoteNumber.toLowerCase().includes(term) ||
-        q.customerName.toLowerCase().includes(term) ||
-        q.title.toLowerCase().includes(term)
-      );
-    });
+    return quotes
+      .filter((q) => {
+        if (!showSimulations && q.isSimulation) return false;
+        if (statusFilter !== 'todos' && q.status !== statusFilter) return false;
+        if (!term) return true;
+        return (
+          q.quoteNumber.toLowerCase().includes(term) ||
+          q.customerName.toLowerCase().includes(term) ||
+          q.title.toLowerCase().includes(term)
+        );
+      })
+      .sort((a, b) => {
+        const ta = toDateObject(a.createdAt)?.getTime() || 0;
+        const tb = toDateObject(b.createdAt)?.getTime() || 0;
+        return tb - ta;
+      });
   }, [quotes, search, statusFilter, showSimulations]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant) return;
+    setFormError(null);
+    if (!tenant) {
+      const msg = 'Sessão da empresa não inicializada. Recarregue a página e tente novamente.';
+      setFormError(msg);
+      showToast(msg, 'error');
+      return;
+    }
     if (items.length === 0 || items.some((i) => !i.productName.trim())) {
-      showToast('Preencha o nome de todos os itens do orçamento.', 'error');
+      const msg = 'Preencha o nome de todos os itens do orçamento.';
+      setFormError(msg);
+      showToast(msg, 'error');
       return;
     }
     setSaving(true);
@@ -207,8 +226,8 @@ export const QuotesModule: React.FC = () => {
           customerName: cust?.fullName || 'Cliente Avulso',
           title: title.trim() || items[0].productName,
           items,
-          discount,
-          shipping,
+          discount: Math.max(0, Number(discount) || 0),
+          shipping: Math.max(0, Number(shipping) || 0),
           totalCost: totals.totalCost,
           totalPrice: totals.totalPrice,
           estimatedProfit: totals.estimatedProfit,
@@ -222,14 +241,19 @@ export const QuotesModule: React.FC = () => {
       showToast(editing ? 'Orçamento atualizado.' : 'Orçamento criado com sucesso.');
       setModalOpen(false);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao salvar orçamento.', 'error');
+      const msg = formatFirestoreErrorMessage(err, 'Erro ao salvar orçamento.');
+      setFormError(msg);
+      showToast(msg, 'error');
     } finally {
       setSaving(false);
     }
   };
 
   const handleApproveQuick = async (q: Quote) => {
-    if (!tenant) return;
+    if (!tenant) {
+      showToast('Sessão da empresa não inicializada.', 'error');
+      return;
+    }
     try {
       await saveQuote(
         tenant,
@@ -253,13 +277,16 @@ export const QuotesModule: React.FC = () => {
       );
       showToast(`Orçamento ${q.quoteNumber} aprovado.`);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao aprovar orçamento.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao aprovar orçamento.'), 'error');
     }
   };
 
   const handleConvert = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant || !convertTarget) return;
+    if (!tenant || !convertTarget) {
+      showToast('Sessão da empresa não inicializada.', 'error');
+      return;
+    }
     setConverting(true);
     try {
       await convertQuoteToOrder(tenant, convertTarget, deliveryDate, paymentMethod, genProduction);
@@ -267,7 +294,7 @@ export const QuotesModule: React.FC = () => {
       setConvertTarget(null);
       setActiveSection('orders');
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao converter orçamento.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao converter orçamento.'), 'error');
     } finally {
       setConverting(false);
     }
@@ -281,7 +308,7 @@ export const QuotesModule: React.FC = () => {
       showToast('Orçamento excluído.');
       setDeleteTarget(null);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao excluir.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao excluir.'), 'error');
     } finally {
       setDeleting(false);
     }
@@ -595,9 +622,12 @@ export const QuotesModule: React.FC = () => {
                   <label className={labelClass}>Peso tot. (g)</label>
                   <input
                     type="number"
+                    step="any"
                     min="0"
                     value={item.weightGrams}
-                    onChange={(e) => updateItem(idx, { weightGrams: Number(e.target.value) })}
+                    onChange={(e) =>
+                      updateItem(idx, { weightGrams: Math.max(0, Number(e.target.value) || 0) })
+                    }
                     className={inputClass}
                   />
                 </div>
@@ -669,6 +699,12 @@ export const QuotesModule: React.FC = () => {
               className={inputClass}
             />
           </div>
+
+          {formError && (
+            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-400">
+              {formError}
+            </div>
+          )}
 
           <div className="flex items-center justify-end gap-3 pt-2">
             <button

@@ -137,14 +137,10 @@ export async function ensureCompanyBootstrap(user: User): Promise<{
         }
       );
       if (Object.keys(patch).length > 0) {
-        await setDoc(
-          settingsRef,
-          {
-            ...patch,
-            updatedAt: serverTimestamp(),
-          },
-          { merge: true }
-        );
+        await updateDoc(settingsRef, {
+          ...patch,
+          updatedAt: serverTimestamp(),
+        });
       }
     }
 
@@ -352,32 +348,27 @@ export async function saveCustomer(
   const id = existingId || createEntityId('cust');
   const path = `customers/${id}`;
   try {
+    const cleanCustomer = {
+      fullName: (data.fullName || '').trim().slice(0, 140),
+      document: (data.document || '').trim().slice(0, 24),
+      phone: (data.phone || '').trim().slice(0, 30),
+      whatsapp: (data.whatsapp || '').trim().slice(0, 30),
+      email: (data.email || '').trim().slice(0, 160),
+      address: (data.address || '').trim().slice(0, 240),
+      city: (data.city || '').trim().slice(0, 100),
+      state: (data.state || '').trim().slice(0, 40),
+      notes: (data.notes || '').trim().slice(0, 1000),
+    };
     if (existingId) {
       await updateDoc(doc(db, 'customers', id), {
-        fullName: data.fullName.trim(),
-        document: data.document.trim(),
-        phone: data.phone.trim(),
-        whatsapp: data.whatsapp.trim(),
-        email: data.email.trim(),
-        address: data.address.trim(),
-        city: data.city.trim(),
-        state: data.state.trim(),
-        notes: data.notes.trim(),
+        ...cleanCustomer,
         updatedAt: serverTimestamp(),
       });
     } else {
       await setDoc(doc(db, 'customers', id), {
         companyId: tenant.companyId,
         ownerUid: tenant.ownerUid,
-        fullName: data.fullName.trim(),
-        document: data.document.trim(),
-        phone: data.phone.trim(),
-        whatsapp: data.whatsapp.trim(),
-        email: data.email.trim(),
-        address: data.address.trim(),
-        city: data.city.trim(),
-        state: data.state.trim(),
-        notes: data.notes.trim(),
+        ...cleanCustomer,
         isArchived: false,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -418,26 +409,31 @@ export async function saveProduct(
   const id = existingId || createEntityId('prd');
   const path = `products/${id}`;
   try {
+    const cleanNum = (v: unknown, min = 0) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? Math.max(min, n) : min;
+    };
+    const rawMargin = Number(data.profitMargin);
     const payload = {
-      name: data.name.trim(),
-      sku: data.sku.trim(),
-      description: data.description.trim(),
-      photoUrls: data.photoUrls || [],
-      category: data.category.trim(),
-      modelFileUrl: data.modelFileUrl || '',
-      modelFileName: data.modelFileName || '',
-      material: data.material.trim(),
-      color: data.color.trim(),
-      estimatedWeightGrams: Number(data.estimatedWeightGrams) || 0,
-      estimatedLengthMeters: Number(data.estimatedLengthMeters) || 0,
-      estimatedTimeMinutes: Number(data.estimatedTimeMinutes) || 0,
-      recommendedPrinterId: data.recommendedPrinterId || '',
-      recommendedPrinterName: data.recommendedPrinterName || '',
-      manufacturingCost: Number(data.manufacturingCost) || 0,
-      salePrice: Number(data.salePrice) || 0,
-      profitMargin: Number(data.profitMargin) || 0,
+      name: (data.name || '').trim().slice(0, 160),
+      sku: (data.sku || '').trim().slice(0, 60),
+      description: (data.description || '').trim().slice(0, 2000),
+      photoUrls: (data.photoUrls || []).slice(0, 8).map((u) => String(u || '').slice(0, 600)).filter(Boolean),
+      category: (data.category || '').trim().slice(0, 80),
+      modelFileUrl: String(data.modelFileUrl || '').slice(0, 600),
+      modelFileName: String(data.modelFileName || '').slice(0, 160),
+      material: (data.material || '').trim().slice(0, 60),
+      color: (data.color || '').trim().slice(0, 60),
+      estimatedWeightGrams: cleanNum(data.estimatedWeightGrams, 0),
+      estimatedLengthMeters: cleanNum(data.estimatedLengthMeters, 0),
+      estimatedTimeMinutes: Math.round(cleanNum(data.estimatedTimeMinutes, 0)),
+      recommendedPrinterId: String(data.recommendedPrinterId || '').slice(0, 128),
+      recommendedPrinterName: String(data.recommendedPrinterName || '').trim().slice(0, 120),
+      manufacturingCost: cleanNum(data.manufacturingCost, 0),
+      salePrice: cleanNum(data.salePrice, 0),
+      profitMargin: Number.isFinite(rawMargin) ? rawMargin : 0,
       isCustom: Boolean(data.isCustom),
-      status: data.status,
+      status: data.status === 'inativo' ? 'inativo' : 'ativo',
     };
     if (existingId) {
       await updateDoc(doc(db, 'products', id), {
@@ -807,6 +803,44 @@ export async function deletePrinter(printerId: string): Promise<void> {
 }
 
 // QUOTES & SIMULATIONS
+function sanitizeQuoteItems(items: Quote['items']): Quote['items'] {
+  const safeNum = (v: unknown, min = 0) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.max(min, n) : min;
+  };
+  return (items || []).slice(0, 40).map((item) => {
+    const quantity = Math.max(1, Math.round(Number(item.quantity) || 1));
+    const unitPrice = safeNum(item.unitPrice, 0);
+    return {
+      id: String(item.id || createEntityId('qi')).slice(0, 128),
+      productId: String(item.productId || '').slice(0, 128),
+      productName: String(item.productName || 'Peça 3D').trim().slice(0, 160) || 'Peça 3D',
+      materialId: String(item.materialId || '').slice(0, 128),
+      materialName: String(item.materialName || '').trim().slice(0, 140),
+      color: String(item.color || '').trim().slice(0, 60),
+      printerId: String(item.printerId || '').slice(0, 128),
+      printerName: String(item.printerName || '').trim().slice(0, 120),
+      quantity,
+      weightGrams: safeNum(item.weightGrams, 0),
+      lengthMeters: safeNum(item.lengthMeters, 0),
+      printTimeMinutes: Math.round(safeNum(item.printTimeMinutes, 0)),
+      materialCost: safeNum(item.materialCost, 0),
+      energyCost: safeNum(item.energyCost, 0),
+      depreciationCost: safeNum(item.depreciationCost, 0),
+      laborCost: safeNum(item.laborCost, 0),
+      packagingCost: safeNum(item.packagingCost, 0),
+      extraCost: safeNum(item.extraCost, 0),
+      totalUnitCost: safeNum(item.totalUnitCost, 0),
+      desiredMarginPercent: Number.isFinite(Number(item.desiredMarginPercent))
+        ? Number(item.desiredMarginPercent)
+        : 0,
+      paymentFeePercent: safeNum(item.paymentFeePercent, 0),
+      unitPrice,
+      totalPrice: Number((quantity * unitPrice).toFixed(2)),
+    };
+  });
+}
+
 export async function saveQuote(
   tenant: TenantContext,
   data: Omit<Quote, 'id' | 'companyId' | 'ownerUid' | 'quoteNumber' | 'convertedOrderId' | 'createdAt' | 'updatedAt'>,
@@ -814,22 +848,35 @@ export async function saveQuote(
 ): Promise<string> {
   const id = existingId || createEntityId('orc');
   const path = `quotes/${id}`;
+  const cleanItems = sanitizeQuoteItems(data.items);
+  const cleanCustomerId = String(data.customerId || '').slice(0, 128);
+  const cleanCustomerName = (data.customerName || 'Cliente Avulso').trim().slice(0, 140) || 'Cliente Avulso';
+  const cleanTitle = (data.title || cleanItems[0]?.productName || 'Orçamento 3D').trim().slice(0, 160);
+  const cleanNotes = (data.notes || '').trim().slice(0, 1000);
+  const cleanValidUntil = String(data.validUntil || '').slice(0, 30);
+  const cleanDiscount = Math.max(0, Number.isFinite(Number(data.discount)) ? Number(data.discount) : 0);
+  const cleanShipping = Math.max(0, Number.isFinite(Number(data.shipping)) ? Number(data.shipping) : 0);
+  const cleanTotalCost = Math.max(0, Number.isFinite(Number(data.totalCost)) ? Number(data.totalCost) : 0);
+  const cleanTotalPrice = Math.max(0, Number.isFinite(Number(data.totalPrice)) ? Number(data.totalPrice) : 0);
+  const cleanProfit = Number.isFinite(Number(data.estimatedProfit)) ? Number(data.estimatedProfit) : 0;
+  const cleanMargin = Number.isFinite(Number(data.profitMarginPercent)) ? Number(data.profitMarginPercent) : 0;
+
   try {
     if (existingId) {
       await updateDoc(doc(db, 'quotes', id), {
-        customerId: data.customerId || '',
-        customerName: data.customerName || '',
-        title: data.title.trim(),
-        items: data.items,
-        discount: Number(data.discount) || 0,
-        shipping: Number(data.shipping) || 0,
-        totalCost: Number(data.totalCost) || 0,
-        totalPrice: Number(data.totalPrice) || 0,
-        estimatedProfit: Number(data.estimatedProfit) || 0,
-        profitMarginPercent: Number(data.profitMarginPercent) || 0,
-        validUntil: data.validUntil || '',
+        customerId: cleanCustomerId,
+        customerName: cleanCustomerName,
+        title: cleanTitle,
+        items: cleanItems,
+        discount: cleanDiscount,
+        shipping: cleanShipping,
+        totalCost: cleanTotalCost,
+        totalPrice: cleanTotalPrice,
+        estimatedProfit: cleanProfit,
+        profitMarginPercent: cleanMargin,
+        validUntil: cleanValidUntil,
         status: data.status,
-        notes: data.notes.trim(),
+        notes: cleanNotes,
         updatedAt: serverTimestamp(),
       });
       return id;
@@ -838,34 +885,58 @@ export async function saveQuote(
     await runTransaction(db, async (tx) => {
       const settingsRef = doc(db, 'settings', tenant.companyId);
       const settingsSnap = await tx.get(settingsRef);
-      const nextNum = ((settingsSnap.data()?.quoteCounter as number) || 0) + 1;
+      const nextNum = settingsSnap.exists()
+        ? ((settingsSnap.data()?.quoteCounter as number) || 0) + 1
+        : 1;
       const prefix = data.isSimulation ? 'SIM' : 'ORC';
       const quoteNumber = `${prefix}-${String(nextNum).padStart(4, '0')}`;
 
-      tx.update(settingsRef, {
-        quoteCounter: nextNum,
-        updatedAt: serverTimestamp(),
-      });
+      if (settingsSnap.exists()) {
+        tx.update(settingsRef, {
+          quoteCounter: nextNum,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        tx.set(settingsRef, {
+          companyId: tenant.companyId,
+          ownerUid: tenant.ownerUid,
+          energyTariffPerKwh: 0.92,
+          defaultProfitMargin: 45,
+          defaultPaymentFeePercent: 3.5,
+          defaultHourlyLaborRate: 25,
+          defaultPackagingCost: 4.5,
+          lowStockThresholdGrams: 250,
+          currency: 'BRL',
+          orderCounter: 0,
+          quoteCounter: nextNum,
+          purchaseCounter: 0,
+          materialTypes: DEFAULT_MATERIAL_TYPES,
+          expenseCategories: DEFAULT_EXPENSE_CATEGORIES,
+          materialDensities: DEFAULT_MATERIAL_DENSITIES,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
 
       tx.set(doc(db, 'quotes', id), {
         companyId: tenant.companyId,
         ownerUid: tenant.ownerUid,
         quoteNumber,
         isSimulation: Boolean(data.isSimulation),
-        customerId: data.customerId || '',
-        customerName: data.customerName || '',
-        title: data.title.trim(),
-        items: data.items,
-        discount: Number(data.discount) || 0,
-        shipping: Number(data.shipping) || 0,
-        totalCost: Number(data.totalCost) || 0,
-        totalPrice: Number(data.totalPrice) || 0,
-        estimatedProfit: Number(data.estimatedProfit) || 0,
-        profitMarginPercent: Number(data.profitMarginPercent) || 0,
-        validUntil: data.validUntil || '',
+        customerId: cleanCustomerId,
+        customerName: cleanCustomerName,
+        title: cleanTitle,
+        items: cleanItems,
+        discount: cleanDiscount,
+        shipping: cleanShipping,
+        totalCost: cleanTotalCost,
+        totalPrice: cleanTotalPrice,
+        estimatedProfit: cleanProfit,
+        profitMarginPercent: cleanMargin,
+        validUntil: cleanValidUntil,
         status: data.status,
         convertedOrderId: '',
-        notes: data.notes.trim(),
+        notes: cleanNotes,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
@@ -898,33 +969,59 @@ export async function convertQuoteToOrder(
 
       const settingsRef = doc(db, 'settings', tenant.companyId);
       const settingsSnap = await tx.get(settingsRef);
-      const nextNum = ((settingsSnap.data()?.orderCounter as number) || 0) + 1;
+      const nextNum = settingsSnap.exists()
+        ? ((settingsSnap.data()?.orderCounter as number) || 0) + 1
+        : 1;
       const orderNumber = `PED-${String(nextNum).padStart(4, '0')}`;
 
-      const orderItems = quote.items.map((item) => ({
-        id: item.id,
-        productId: item.productId || '',
-        productName: item.productName,
-        isCustom: !item.productId,
-        materialId: item.materialId || '',
-        materialName: item.materialName || '',
-        color: item.color || '',
-        printerId: item.printerId || '',
-        printerName: item.printerName || '',
-        quantity: item.quantity,
-        weightGrams: item.weightGrams,
-        printTimeMinutes: item.printTimeMinutes,
-        unitCost: item.totalUnitCost,
-        unitPrice: item.unitPrice,
-        totalPrice: item.totalPrice,
-      }));
+      const orderItems = sanitizeOrderItems(
+        quote.items.map((item) => ({
+          id: item.id,
+          productId: item.productId || '',
+          productName: item.productName,
+          isCustom: !item.productId,
+          materialId: item.materialId || '',
+          materialName: item.materialName || '',
+          color: item.color || '',
+          printerId: item.printerId || '',
+          printerName: item.printerName || '',
+          quantity: item.quantity,
+          weightGrams: item.weightGrams,
+          printTimeMinutes: item.printTimeMinutes,
+          unitCost: item.totalUnitCost,
+          unitPrice: item.unitPrice,
+          totalPrice: item.totalPrice,
+        }))
+      );
 
       const subtotal = orderItems.reduce((acc, i) => acc + i.totalPrice, 0);
 
-      tx.update(settingsRef, {
-        orderCounter: nextNum,
-        updatedAt: serverTimestamp(),
-      });
+      if (settingsSnap.exists()) {
+        tx.update(settingsRef, {
+          orderCounter: nextNum,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        tx.set(settingsRef, {
+          companyId: tenant.companyId,
+          ownerUid: tenant.ownerUid,
+          energyTariffPerKwh: 0.92,
+          defaultProfitMargin: 45,
+          defaultPaymentFeePercent: 3.5,
+          defaultHourlyLaborRate: 25,
+          defaultPackagingCost: 4.5,
+          lowStockThresholdGrams: 250,
+          currency: 'BRL',
+          orderCounter: nextNum,
+          quoteCounter: 0,
+          purchaseCounter: 0,
+          materialTypes: DEFAULT_MATERIAL_TYPES,
+          expenseCategories: DEFAULT_EXPENSE_CATEGORIES,
+          materialDensities: DEFAULT_MATERIAL_DENSITIES,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
 
       tx.update(quoteRef, {
         status: 'convertido',
@@ -2278,28 +2375,52 @@ export async function savePurchase(
     await runTransaction(db, async (tx) => {
       const settingsRef = doc(db, 'settings', tenant.companyId);
       const settingsSnap = await tx.get(settingsRef);
-      const nextNum = ((settingsSnap.data()?.purchaseCounter as number) || 0) + 1;
+      const nextNum = settingsSnap.exists()
+        ? ((settingsSnap.data()?.purchaseCounter as number) || 0) + 1
+        : 1;
       const purchaseNumber = `CMP-${String(nextNum).padStart(4, '0')}`;
 
-      tx.update(settingsRef, {
-        purchaseCounter: nextNum,
-        updatedAt: serverTimestamp(),
-      });
+      if (settingsSnap.exists()) {
+        tx.update(settingsRef, {
+          purchaseCounter: nextNum,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        tx.set(settingsRef, {
+          companyId: tenant.companyId,
+          ownerUid: tenant.ownerUid,
+          energyTariffPerKwh: 0.92,
+          defaultProfitMargin: 45,
+          defaultPaymentFeePercent: 3.5,
+          defaultHourlyLaborRate: 25,
+          defaultPackagingCost: 4.5,
+          lowStockThresholdGrams: 250,
+          currency: 'BRL',
+          orderCounter: 0,
+          quoteCounter: 0,
+          purchaseCounter: nextNum,
+          materialTypes: DEFAULT_MATERIAL_TYPES,
+          expenseCategories: DEFAULT_EXPENSE_CATEGORIES,
+          materialDensities: DEFAULT_MATERIAL_DENSITIES,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
 
       tx.set(doc(db, 'purchases', id), {
         companyId: tenant.companyId,
         ownerUid: tenant.ownerUid,
         purchaseNumber,
-        supplierId: data.supplierId || '',
-        supplierName: data.supplierName || '',
-        items: data.items,
-        shipping: Number(data.shipping) || 0,
-        totalValue: Number(data.totalValue) || 0,
-        purchaseDate: data.purchaseDate || getTodayISO(),
-        paymentMethod: data.paymentMethod || 'PIX',
+        supplierId: String(data.supplierId || '').slice(0, 128),
+        supplierName: String(data.supplierName || '').trim().slice(0, 140),
+        items: (data.items || []).slice(0, 40),
+        shipping: Math.max(0, Number(data.shipping) || 0),
+        totalValue: Math.max(0, Number(data.totalValue) || 0),
+        purchaseDate: String(data.purchaseDate || getTodayISO()).slice(0, 30),
+        paymentMethod: String(data.paymentMethod || 'PIX').slice(0, 60),
         status: 'pendente',
         stockUpdated: false,
-        notes: data.notes.trim(),
+        notes: (data.notes || '').trim().slice(0, 600),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });

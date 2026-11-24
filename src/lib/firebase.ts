@@ -105,6 +105,30 @@ export function handleFirestoreError(
   throw new Error(JSON.stringify(errInfo));
 }
 
+export function formatFirestoreErrorMessage(
+  error: unknown,
+  fallback = 'Erro ao comunicar com o banco de dados.'
+): string {
+  if (!(error instanceof Error)) return fallback;
+  try {
+    const parsed = JSON.parse(error.message) as {
+      error?: string;
+      path?: string | null;
+      operationType?: string;
+    };
+    if (parsed && parsed.error) {
+      const msg = parsed.error;
+      if (msg.includes('Missing or insufficient permissions') || msg.includes('PERMISSION_DENIED')) {
+        return `Permissão negada no Firestore (${parsed.path || 'banco'}). Verifique se sua conta Google está verificada e tente recarregar a sessão.`;
+      }
+      return `${msg}${parsed.path ? ` (${parsed.path})` : ''}`;
+    }
+  } catch {
+    // Plain non-JSON error
+  }
+  return error.message || fallback;
+}
+
 export async function testConnection(): Promise<boolean> {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));

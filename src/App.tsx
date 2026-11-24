@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { Loader2, Layers } from 'lucide-react';
+import { AlertTriangle, Layers, Loader2, LogOut, RefreshCw } from 'lucide-react';
 import { ErpProvider, useErp } from './context/ErpContext';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { ToastContainer } from './components/common/UiPrimitives';
@@ -26,7 +26,18 @@ import { ReportsModule } from './components/modules/ReportsModule';
 import { SettingsModule } from './components/modules/SettingsModule';
 
 const ErpWorkspace: React.FC = () => {
-  const { user, authReady, bootstrapping, activeSection, toasts, dismissToast } = useErp();
+  const {
+    user,
+    tenant,
+    authReady,
+    bootstrapping,
+    authError,
+    retryBootstrap,
+    logout,
+    activeSection,
+    toasts,
+    dismissToast,
+  } = useErp();
 
   if (!authReady || bootstrapping) {
     return (
@@ -46,6 +57,55 @@ const ErpWorkspace: React.FC = () => {
     return (
       <>
         <LoginScreen />
+        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      </>
+    );
+  }
+
+  if (!tenant) {
+    return (
+      <>
+        <div className="min-h-screen bg-[#101114] text-[#F5F5F5] flex items-center justify-center p-6">
+          <div className="max-w-lg w-full bg-[#1D2027] border border-red-500/30 rounded-2xl p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-400 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-[#F5F5F5]">
+                  Não foi possível inicializar sua empresa no banco de dados
+                </h2>
+                <p className="text-xs text-[#9CA3AF] mt-1">
+                  Conta conectada: <strong className="text-[#F5F5F5]">{user.email || user.uid}</strong>
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-lg bg-[#101114] border border-[#282C35] text-xs text-red-300 leading-relaxed break-words">
+              {authError ||
+                'Falha ao carregar ou criar o perfil da empresa no Firestore. Sem essa inicialização os cadastros não podem ser salvos.'}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              <button
+                type="button"
+                onClick={() => void retryBootstrap()}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#F97316] hover:bg-[#EA580C] text-white text-sm font-semibold cursor-pointer"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Tentar novamente
+              </button>
+              <button
+                type="button"
+                onClick={() => void logout()}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-[#2C313D] text-sm text-[#9CA3AF] hover:text-[#F5F5F5] cursor-pointer"
+              >
+                <LogOut className="w-4 h-4" />
+                Sair / Trocar conta
+              </button>
+            </div>
+          </div>
+        </div>
         <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       </>
     );

@@ -13,9 +13,10 @@ import {
   Users,
 } from 'lucide-react';
 import { useErp } from '../../context/ErpContext';
+import { formatFirestoreErrorMessage } from '../../lib/firebase';
 import { deleteOrArchiveCustomer, saveCustomer } from '../../services/erpService';
 import type { Customer } from '../../types/erp';
-import { formatBRL, formatDateBR } from '../../utils/formatters';
+import { formatBRL, formatDateBR, toDateObject } from '../../utils/formatters';
 import {
   ConfirmModal,
   EmptyState,
@@ -103,15 +104,21 @@ export const CustomersModule: React.FC = () => {
 
   const filteredCustomers = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return activeCustomers;
-    return activeCustomers.filter(
-      (c) =>
-        c.fullName.toLowerCase().includes(term) ||
-        c.phone.toLowerCase().includes(term) ||
-        c.whatsapp.toLowerCase().includes(term) ||
-        c.document.toLowerCase().includes(term) ||
-        c.email.toLowerCase().includes(term)
-    );
+    const list = !term
+      ? activeCustomers
+      : activeCustomers.filter(
+          (c) =>
+            c.fullName.toLowerCase().includes(term) ||
+            c.phone.toLowerCase().includes(term) ||
+            c.whatsapp.toLowerCase().includes(term) ||
+            c.document.toLowerCase().includes(term) ||
+            c.email.toLowerCase().includes(term)
+        );
+    return [...list].sort((a, b) => {
+      const ta = toDateObject(a.createdAt)?.getTime() || 0;
+      const tb = toDateObject(b.createdAt)?.getTime() || 0;
+      return tb - ta;
+    });
   }, [activeCustomers, search]);
 
   const selectedCustomer = useMemo(
@@ -143,7 +150,10 @@ export const CustomersModule: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant) return;
+    if (!tenant) {
+      showToast('Sessão da empresa não inicializada. Recarregue a página.', 'error');
+      return;
+    }
     if (!form.fullName.trim()) {
       showToast('Informe o nome completo do cliente.', 'error');
       return;
@@ -154,7 +164,7 @@ export const CustomersModule: React.FC = () => {
       showToast(editingCustomer ? 'Cliente atualizado com sucesso.' : 'Cliente cadastrado com sucesso.');
       setModalOpen(false);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao salvar cliente.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao salvar cliente.'), 'error');
     } finally {
       setSaving(false);
     }
