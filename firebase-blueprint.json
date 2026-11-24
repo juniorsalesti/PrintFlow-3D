@@ -1,0 +1,521 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Usuário autenticado no PrintFlow 3D vinculado a uma empresa.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 160 },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "photoURL": { "type": "string", "maxLength": 600 },
+        "companyId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "role": { "type": "string", "enum": ["owner", "manager", "operator", "viewer"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "displayName", "companyId", "role", "createdAt", "updatedAt"]
+    },
+    "Company": {
+      "title": "Company",
+      "description": "Empresa de impressão 3D (tenant principal).",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "cnpj": { "type": "string", "maxLength": 24 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "email": { "type": "string", "maxLength": 160 },
+        "address": { "type": "string", "maxLength": 240 },
+        "logoUrl": { "type": "string", "maxLength": 600 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerUid", "name", "createdAt", "updatedAt"]
+    },
+    "CompanyMember": {
+      "title": "CompanyMember",
+      "description": "Colaborador e permissões vinculados à empresa.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "email": { "type": "string", "minLength": 3, "maxLength": 160 },
+        "role": { "type": "string", "enum": ["owner", "manager", "operator", "viewer"] },
+        "status": { "type": "string", "enum": ["ativo", "convidado", "inativo"] },
+        "permissions": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "ownerUid", "name", "email", "role", "status", "permissions", "createdAt", "updatedAt"]
+    },
+    "Settings": {
+      "title": "Settings",
+      "description": "Configurações operacionais, tarifas, margens e catálogos da empresa.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "energyTariffPerKwh": { "type": "number" },
+        "defaultProfitMargin": { "type": "number" },
+        "defaultPaymentFeePercent": { "type": "number" },
+        "defaultHourlyLaborRate": { "type": "number" },
+        "defaultPackagingCost": { "type": "number" },
+        "lowStockThresholdGrams": { "type": "number" },
+        "currency": { "type": "string", "maxLength": 10 },
+        "orderCounter": { "type": "number" },
+        "quoteCounter": { "type": "number" },
+        "purchaseCounter": { "type": "number" },
+        "materialTypes": { "type": "array" },
+        "expenseCategories": { "type": "array" },
+        "materialDensities": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "ownerUid", "energyTariffPerKwh", "defaultProfitMargin", "currency", "createdAt", "updatedAt"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Cliente cadastrado pela empresa.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "fullName": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "document": { "type": "string", "maxLength": 24 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "whatsapp": { "type": "string", "maxLength": 30 },
+        "email": { "type": "string", "maxLength": 160 },
+        "address": { "type": "string", "maxLength": 240 },
+        "city": { "type": "string", "maxLength": 100 },
+        "state": { "type": "string", "maxLength": 40 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "isArchived": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "ownerUid", "fullName", "isArchived", "createdAt", "updatedAt"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Produto de catálogo ou personalizado fabricado em impressão 3D.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "sku": { "type": "string", "maxLength": 60 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "photoUrls": { "type": "array" },
+        "category": { "type": "string", "maxLength": 80 },
+        "modelFileUrl": { "type": "string", "maxLength": 600 },
+        "modelFileName": { "type": "string", "maxLength": 160 },
+        "material": { "type": "string", "maxLength": 60 },
+        "color": { "type": "string", "maxLength": 60 },
+        "estimatedWeightGrams": { "type": "number" },
+        "estimatedLengthMeters": { "type": "number" },
+        "estimatedTimeMinutes": { "type": "number" },
+        "recommendedPrinterId": { "type": "string", "maxLength": 128 },
+        "recommendedPrinterName": { "type": "string", "maxLength": 120 },
+        "manufacturingCost": { "type": "number" },
+        "salePrice": { "type": "number" },
+        "profitMargin": { "type": "number" },
+        "isCustom": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["ativo", "inativo"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "ownerUid", "name", "status", "createdAt", "updatedAt"]
+    },
+    "Material": {
+      "title": "Material",
+      "description": "Rolo ou lote de filamento em estoque.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "brand": { "type": "string", "maxLength": 80 },
+        "materialType": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "color": { "type": "string", "maxLength": 60 },
+        "colorHex": { "type": "string", "maxLength": 20 },
+        "diameterMm": { "type": "number" },
+        "initialWeightGrams": { "type": "number" },
+        "currentWeightGrams": { "type": "number" },
+        "reservedWeightGrams": { "type": "number" },
+        "emptySpoolWeightGrams": { "type": "number" },
+        "acquisitionPrice": { "type": "number" },
+        "supplierId": { "type": "string", "maxLength": 128 },
+        "supplierName": { "type": "string", "maxLength": 140 },
+        "purchaseDate": { "type": "string", "maxLength": 30 },
+        "minStockGrams": { "type": "number" },
+        "storageLocation": { "type": "string", "maxLength": 100 },
+        "gramsPerMeter": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "ownerUid", "name", "materialType", "diameterMm", "initialWeightGrams", "currentWeightGrams", "reservedWeightGrams", "acquisitionPrice", "createdAt", "updatedAt"]
+    },
+    "InventoryMovement": {
+      "title": "InventoryMovement",
+      "description": "Histórico auditável de movimentação de filamentos.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "materialId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "materialName": { "type": "string", "maxLength": 140 },
+        "type": { "type": "string", "enum": ["entrada", "consumo", "desperdicio", "ajuste", "devolucao", "reserva", "liberacao_reserva"] },
+        "quantityGrams": { "type": "number" },
+        "previousWeightGrams": { "type": "number" },
+        "newWeightGrams": { "type": "number" },
+        "unitCostPerGram": { "type": "number" },
+        "totalCost": { "type": "number" },
+        "referenceType": { "type": "string", "enum": ["compra", "producao", "pedido", "manual"] },
+        "referenceId": { "type": "string", "maxLength": 128 },
+        "idempotencyKey": { "type": "string", "maxLength": 160 },
+        "notes": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "ownerUid", "materialId", "type", "quantityGrams", "createdAt", "updatedAt"]
+    },
+    "Printer": {
+      "title": "Printer",
+      "description": "Impressora 3D cadastrada na empresa.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "manufacturer": { "type": "string", "maxLength": 80 },
+        "model": { "type": "string", "maxLength": 80 },
+        "technology": { "type": "string", "maxLength": 40 },
+        "filamentDiameterMm": { "type": "number" },
+        "serialNumber": { "type": "string", "maxLength": 80 },
+        "acquisitionDate": { "type": "string", "maxLength": 30 },
+        "acquisitionValue": { "type": "number" },
+        "estimatedLifespanHours": { "type": "number" },
+        "averagePowerWatts": { "type": "number" },
+        "status": { "type": "string", "enum": ["disponivel", "imprimindo", "em_manutencao", "inativa"] },
+        "accumulatedHours": { "type": "number" },
+        "totalPrintCount": { "type": "number" },
+        "totalFailureCount": { "type": "number" },
+        "lastMaintenanceDate": { "type": "string", "maxLength": 30 },
+        "nextMaintenanceDate": { "type": "string", "maxLength": 30 },
+        "notes": { "type": "string", "maxLength": 600 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "ownerUid", "name", "status", "createdAt", "updatedAt"]
+    },
+    "MaintenanceRecord": {
+      "title": "MaintenanceRecord",
+      "description": "Registro de manutenção ou falha de impressora.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "printerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "printerName": { "type": "string", "maxLength": 120 },
+        "type": { "type": "string", "enum": ["preventiva", "corretiva", "calibracao", "falha"] },
+        "description": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "cost": { "type": "number" },
+        "date": { "type": "string", "maxLength": 30 },
+        "nextDueDate": { "type": "string", "maxLength": 30 },
+        "status": { "type": "string", "enum": ["pendente", "concluida"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "ownerUid", "printerId", "type", "description", "status", "createdAt", "updatedAt"]
+    },
+    "Quote": {
+      "title": "Quote",
+      "description": "Orçamento ou simulação de precificação.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "quoteNumber": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "isSimulation": { "type": "boolean" },
+        "customerId": { "type": "string", "maxLength": 128 },
+        "customerName": { "type": "string", "maxLength": 140 },
+        "title": { "type": "string", "maxLength": 160 },
+        "items": { "type": "array" },
+        "discount": { "type": "number" },
+        "shipping": { "type": "number" },
+        "totalCost": { "type": "number" },
+        "totalPrice": { "type": "number" },
+        "estimatedProfit": { "type": "number" },
+        "profitMarginPercent": { "type": "number" },
+        "validUntil": { "type": "string", "maxLength": 30 },
+        "status": { "type": "string", "enum": ["rascunho", "novo_orcamento", "aguardando_aprovacao", "aprovado", "convertido", "rejeitado"] },
+        "convertedOrderId": { "type": "string", "maxLength": 128 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "ownerUid", "quoteNumber", "isSimulation", "items", "totalPrice", "status", "createdAt", "updatedAt"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Pedido de venda e produção.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "orderNumber": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "quoteId": { "type": "string", "maxLength": 128 },
+        "customerId": { "type": "string", "maxLength": 128 },
+        "customerName": { "type": "string", "maxLength": 140 },
+        "expectedDeliveryDate": { "type": "string", "maxLength": 30 },
+        "items": { "type": "array" },
+        "subtotal": { "type": "number" },
+        "discount": { "type": "number" },
+        "shipping": { "type": "number" },
+        "totalValue": { "type": "number" },
+        "totalCost": { "type": "number" },
+        "paidAmount": { "type": "number" },
+        "paymentMethod": { "type": "string", "maxLength": 60 },
+        "paymentStatus": { "type": "string", "enum": ["pendente", "parcial", "pago", "cancelado"] },
+        "status": { "type": "string", "enum": ["novo_orcamento", "aguardando_aprovacao", "aprovado", "aguardando_producao", "em_producao", "finalizado", "pronto_retirada", "enviado", "entregue", "cancelado"] },
+        "productionGenerated": { "type": "boolean" },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "ownerUid", "orderNumber", "items", "totalValue", "paymentStatus", "status", "productionGenerated", "createdAt", "updatedAt"]
+    },
+    "ProductionJob": {
+      "title": "ProductionJob",
+      "description": "Ordem/tarefa de impressão 3D vinculada a pedido, impressora e filamento.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "orderId": { "type": "string", "maxLength": 128 },
+        "orderNumber": { "type": "string", "maxLength": 40 },
+        "productId": { "type": "string", "maxLength": 128 },
+        "productName": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "customerId": { "type": "string", "maxLength": 128 },
+        "customerName": { "type": "string", "maxLength": 140 },
+        "printerId": { "type": "string", "maxLength": 128 },
+        "printerName": { "type": "string", "maxLength": 120 },
+        "materialId": { "type": "string", "maxLength": 128 },
+        "materialName": { "type": "string", "maxLength": 140 },
+        "color": { "type": "string", "maxLength": 60 },
+        "quantity": { "type": "number" },
+        "plannedWeightGrams": { "type": "number" },
+        "actualWeightGrams": { "type": "number" },
+        "wasteWeightGrams": { "type": "number" },
+        "reservedWeightGrams": { "type": "number" },
+        "estimatedMinutes": { "type": "number" },
+        "actualMinutes": { "type": "number" },
+        "startedAt": { "type": "string", "maxLength": 40 },
+        "estimatedFinishAt": { "type": "string", "maxLength": 40 },
+        "finishedAt": { "type": "string", "maxLength": 40 },
+        "operatorName": { "type": "string", "maxLength": 100 },
+        "status": { "type": "string", "enum": ["aguardando_producao", "na_fila", "preparando_impressao", "imprimindo", "pausado", "falha_impressao", "finalizado", "cancelado"] },
+        "stockDeducted": { "type": "boolean" },
+        "materialReserved": { "type": "boolean" },
+        "costRecorded": { "type": "boolean" },
+        "actualMaterialCost": { "type": "number" },
+        "actualEnergyCost": { "type": "number" },
+        "actualDepreciationCost": { "type": "number" },
+        "totalActualCost": { "type": "number" },
+        "attemptNumber": { "type": "number" },
+        "parentJobId": { "type": "string", "maxLength": 128 },
+        "failureReason": { "type": "string", "maxLength": 400 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "ownerUid", "productName", "quantity", "status", "stockDeducted", "materialReserved", "costRecorded", "attemptNumber", "createdAt", "updatedAt"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Lançamento financeiro de receita ou despesa.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "type": { "type": "string", "enum": ["receita", "despesa"] },
+        "category": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "amount": { "type": "number" },
+        "dueDate": { "type": "string", "maxLength": 30 },
+        "paymentDate": { "type": "string", "maxLength": 30 },
+        "paymentMethod": { "type": "string", "maxLength": 60 },
+        "status": { "type": "string", "enum": ["pendente", "pago", "atrasado", "cancelado"] },
+        "orderId": { "type": "string", "maxLength": 128 },
+        "orderNumber": { "type": "string", "maxLength": 40 },
+        "purchaseId": { "type": "string", "maxLength": 128 },
+        "isProductionCost": { "type": "boolean" },
+        "idempotencyKey": { "type": "string", "maxLength": 160 },
+        "notes": { "type": "string", "maxLength": 600 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "ownerUid", "type", "category", "description", "amount", "status", "isProductionCost", "createdAt", "updatedAt"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Despesa administrativa, manutenção ou compra.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "description": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "category": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "amount": { "type": "number" },
+        "dueDate": { "type": "string", "maxLength": 30 },
+        "paymentDate": { "type": "string", "maxLength": 30 },
+        "paymentMethod": { "type": "string", "maxLength": 60 },
+        "status": { "type": "string", "enum": ["pendente", "pago", "atrasado", "cancelado"] },
+        "orderId": { "type": "string", "maxLength": 128 },
+        "purchaseId": { "type": "string", "maxLength": 128 },
+        "supplierId": { "type": "string", "maxLength": 128 },
+        "notes": { "type": "string", "maxLength": 600 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "ownerUid", "description", "category", "amount", "status", "createdAt", "updatedAt"]
+    },
+    "Supplier": {
+      "title": "Supplier",
+      "description": "Fornecedor de filamentos, peças e insumos.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "document": { "type": "string", "maxLength": 24 },
+        "contactName": { "type": "string", "maxLength": 120 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "whatsapp": { "type": "string", "maxLength": 30 },
+        "email": { "type": "string", "maxLength": 160 },
+        "address": { "type": "string", "maxLength": 240 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "ownerUid", "name", "createdAt", "updatedAt"]
+    },
+    "Purchase": {
+      "title": "Purchase",
+      "description": "Ordem de compra de filamentos e insumos.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "purchaseNumber": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "supplierId": { "type": "string", "maxLength": 128 },
+        "supplierName": { "type": "string", "maxLength": 140 },
+        "items": { "type": "array" },
+        "shipping": { "type": "number" },
+        "totalValue": { "type": "number" },
+        "purchaseDate": { "type": "string", "maxLength": 30 },
+        "paymentMethod": { "type": "string", "maxLength": 60 },
+        "status": { "type": "string", "enum": ["pendente", "recebido", "cancelado"] },
+        "stockUpdated": { "type": "boolean" },
+        "notes": { "type": "string", "maxLength": 600 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "ownerUid", "purchaseNumber", "items", "totalValue", "status", "stockUpdated", "createdAt", "updatedAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Notificação e alerta operacional.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "message": { "type": "string", "minLength": 1, "maxLength": 400 },
+        "type": { "type": "string", "enum": ["estoque_baixo", "prazo_proximo", "pedido_atrasado", "manutencao", "conta_vencendo", "falha_impressao", "sistema"] },
+        "severity": { "type": "string", "enum": ["info", "warning", "danger"] },
+        "referenceId": { "type": "string", "maxLength": 128 },
+        "isRead": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "ownerUid", "title", "message", "type", "severity", "isRead", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Perfis de usuários autenticados."
+    },
+    "/companies/{companyId}": {
+      "schema": { "$ref": "#/entities/Company" },
+      "description": "Empresas cadastradas no PrintFlow 3D."
+    },
+    "/companies/{companyId}/members/{memberId}": {
+      "schema": { "$ref": "#/entities/CompanyMember" },
+      "description": "Membros e permissões da empresa."
+    },
+    "/settings/{companyId}": {
+      "schema": { "$ref": "#/entities/Settings" },
+      "description": "Configurações operacionais e de precificação por empresa."
+    },
+    "/customers/{customerId}": {
+      "schema": { "$ref": "#/entities/Customer" },
+      "description": "Clientes isolados por empresa."
+    },
+    "/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Catálogo de produtos e peças personalizadas."
+    },
+    "/materials/{materialId}": {
+      "schema": { "$ref": "#/entities/Material" },
+      "description": "Filamentos e estoque por empresa."
+    },
+    "/inventoryMovements/{movementId}": {
+      "schema": { "$ref": "#/entities/InventoryMovement" },
+      "description": "Movimentações de entrada, reserva, consumo e ajuste de estoque."
+    },
+    "/printers/{printerId}": {
+      "schema": { "$ref": "#/entities/Printer" },
+      "description": "Impressoras 3D cadastradas."
+    },
+    "/maintenanceRecords/{recordId}": {
+      "schema": { "$ref": "#/entities/MaintenanceRecord" },
+      "description": "Histórico de manutenções e falhas das impressoras."
+    },
+    "/quotes/{quoteId}": {
+      "schema": { "$ref": "#/entities/Quote" },
+      "description": "Orçamentos e simulações de precificação."
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "Pedidos de clientes."
+    },
+    "/productionJobs/{jobId}": {
+      "schema": { "$ref": "#/entities/ProductionJob" },
+      "description": "Tarefas de produção em impressoras 3D."
+    },
+    "/transactions/{transactionId}": {
+      "schema": { "$ref": "#/entities/Transaction" },
+      "description": "Fluxo de caixa, receitas e custos."
+    },
+    "/expenses/{expenseId}": {
+      "schema": { "$ref": "#/entities/Expense" },
+      "description": "Contas a pagar e despesas administrativas."
+    },
+    "/suppliers/{supplierId}": {
+      "schema": { "$ref": "#/entities/Supplier" },
+      "description": "Fornecedores da empresa."
+    },
+    "/purchases/{purchaseId}": {
+      "schema": { "$ref": "#/entities/Purchase" },
+      "description": "Compras de filamentos e insumos."
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/Notification" },
+      "description": "Alertas e notificações operacionais."
+    }
+  }
+}

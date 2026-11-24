@@ -1,0 +1,966 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================================
+    // 1. GLOBAL SAFETY NET (Default Deny)
+    // =========================================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // 2. PRIMITIVE HELPERS
+    // =========================================================================
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'juniorsalesti@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isCompanyOwner(companyId) {
+      return isValidId(companyId) &&
+        exists(/databases/$(database)/documents/companies/$(companyId)) &&
+        get(/databases/$(database)/documents/companies/$(companyId)).data.ownerUid == request.auth.uid;
+    }
+
+    function isImmutableTenantFields() {
+      return incoming().companyId == existing().companyId &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time;
+    }
+
+    function isCreateTimestamps() {
+      return incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+    }
+
+    function isStr(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    function isNum(val, minVal) {
+      return (val is int || val is float) && val >= minVal;
+    }
+
+    function isBoundedStringList(val, maxSize, maxItemLen) {
+      return val is list && val.size() <= maxSize && (
+        val.size() == 0 || (val[0] is string && val[0].size() <= maxItemLen)
+      );
+    }
+
+    function isBoundedMapList(val, maxSize) {
+      return val is list && val.size() <= maxSize && (
+        val.size() == 0 || val[0] is map
+      );
+    }
+
+    // =========================================================================
+    // 3. ENTITY VALIDATION BLUEPRINTS
+    // =========================================================================
+
+    function isValidUser(data, userId) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'photoURL', 'companyId', 'role', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'displayName', 'photoURL', 'companyId', 'role', 'createdAt', 'updatedAt']) &&
+        data.uid == userId &&
+        isValidId(data.uid) &&
+        isStr(data.email, 3, 160) &&
+        isStr(data.displayName, 1, 120) &&
+        isStr(data.photoURL, 0, 600) &&
+        isValidId(data.companyId) &&
+        data.role in ['owner', 'manager', 'operator', 'viewer'];
+    }
+
+    function isValidCompany(data) {
+      return data.keys().hasAll(['ownerUid', 'name', 'cnpj', 'phone', 'email', 'address', 'logoUrl', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['ownerUid', 'name', 'cnpj', 'phone', 'email', 'address', 'logoUrl', 'createdAt', 'updatedAt']) &&
+        isValidId(data.ownerUid) &&
+        isStr(data.name, 1, 140) &&
+        isStr(data.cnpj, 0, 24) &&
+        isStr(data.phone, 0, 30) &&
+        isStr(data.email, 0, 160) &&
+        isStr(data.address, 0, 240) &&
+        isStr(data.logoUrl, 0, 600);
+    }
+
+    function isValidCompanyMember(data) {
+      return data.keys().hasAll(['companyId', 'ownerUid', 'name', 'email', 'role', 'status', 'permissions', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['companyId', 'ownerUid', 'name', 'email', 'role', 'status', 'permissions', 'createdAt', 'updatedAt']) &&
+        isValidId(data.companyId) &&
+        isValidId(data.ownerUid) &&
+        isStr(data.name, 1, 120) &&
+        isStr(data.email, 3, 160) &&
+        data.role in ['owner', 'manager', 'operator', 'viewer'] &&
+        data.status in ['ativo', 'convidado', 'inativo'] &&
+        isBoundedStringList(data.permissions, 20, 60);
+    }
+
+    function isValidSettings(data) {
+      return data.keys().hasAll([
+          'companyId', 'ownerUid', 'energyTariffPerKwh', 'defaultProfitMargin',
+          'defaultPaymentFeePercent', 'defaultHourlyLaborRate', 'defaultPackagingCost',
+          'lowStockThresholdGrams', 'currency', 'orderCounter', 'quoteCounter',
+          'purchaseCounter', 'materialTypes', 'expenseCategories', 'materialDensities',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'companyId', 'ownerUid', 'energyTariffPerKwh', 'defaultProfitMargin',
+          'defaultPaymentFeePercent', 'defaultHourlyLaborRate', 'defaultPackagingCost',
+          'lowStockThresholdGrams', 'currency', 'orderCounter', 'quoteCounter',
+          'purchaseCounter', 'materialTypes', 'expenseCategories', 'materialDensities',
+          'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.companyId) &&
+        isValidId(data.ownerUid) &&
+        isNum(data.energyTariffPerKwh, 0) &&
+        isNum(data.defaultProfitMargin, 0) &&
+        data.defaultProfitMargin < 100 &&
+        isNum(data.defaultPaymentFeePercent, 0) &&
+        data.defaultPaymentFeePercent < 100 &&
+        isNum(data.defaultHourlyLaborRate, 0) &&
+        isNum(data.defaultPackagingCost, 0) &&
+        isNum(data.lowStockThresholdGrams, 0) &&
+        isStr(data.currency, 1, 10) &&
+        isNum(data.orderCounter, 0) &&
+        isNum(data.quoteCounter, 0) &&
+        isNum(data.purchaseCounter, 0) &&
+        isBoundedStringList(data.materialTypes, 40, 60) &&
+        isBoundedStringList(data.expenseCategories, 40, 80) &&
+        data.materialDensities is map;
+    }
+
+    function isValidCustomer(data) {
+      return data.keys().hasAll([
+          'companyId', 'ownerUid', 'fullName', 'document', 'phone', 'whatsapp',
+          'email', 'address', 'city', 'state', 'notes', 'isArchived', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'companyId', 'ownerUid', 'fullName', 'document', 'phone', 'whatsapp',
+          'email', 'address', 'city', 'state', 'notes', 'isArchived', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.companyId) &&
+        isValidId(data.ownerUid) &&
+        isStr(data.fullName, 1, 140) &&
+        isStr(data.document, 0, 24) &&
+        isStr(data.phone, 0, 30) &&
+        isStr(data.whatsapp, 0, 30) &&
+        isStr(data.email, 0, 160) &&
+        isStr(data.address, 0, 240) &&
+        isStr(data.city, 0, 100) &&
+        isStr(data.state, 0, 40) &&
+        isStr(data.notes, 0, 1000) &&
+        data.isArchived is bool;
+    }
+
+    function isValidProduct(data) {
+      return data.keys().hasAll([
+          'companyId', 'ownerUid', 'name', 'sku', 'description', 'photoUrls', 'category',
+          'modelFileUrl', 'modelFileName', 'material', 'color', 'estimatedWeightGrams',
+          'estimatedLengthMeters', 'estimatedTimeMinutes', 'recommendedPrinterId',
+          'recommendedPrinterName', 'manufacturingCost', 'salePrice', 'profitMargin',
+          'isCustom', 'status', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'companyId', 'ownerUid', 'name', 'sku', 'description', 'photoUrls', 'category',
+          'modelFileUrl', 'modelFileName', 'material', 'color', 'estimatedWeightGrams',
+          'estimatedLengthMeters', 'estimatedTimeMinutes', 'recommendedPrinterId',
+          'recommendedPrinterName', 'manufacturingCost', 'salePrice', 'profitMargin',
+          'isCustom', 'status', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.companyId) &&
+        isValidId(data.ownerUid) &&
+        isStr(data.name, 1, 160) &&
+        isStr(data.sku, 0, 60) &&
+        isStr(data.description, 0, 2000) &&
+        isBoundedStringList(data.photoUrls, 8, 600) &&
+        isStr(data.category, 0, 80) &&
+        isStr(data.modelFileUrl, 0, 600) &&
+        isStr(data.modelFileName, 0, 160) &&
+        isStr(data.material, 0, 60) &&
+        isStr(data.color, 0, 60) &&
+        isNum(data.estimatedWeightGrams, 0) &&
+        isNum(data.estimatedLengthMeters, 0) &&
+        isNum(data.estimatedTimeMinutes, 0) &&
+        isStr(data.recommendedPrinterId, 0, 128) &&
+        isStr(data.recommendedPrinterName, 0, 120) &&
+        isNum(data.manufacturingCost, 0) &&
+        isNum(data.salePrice, 0) &&
+        (data.profitMargin is int || data.profitMargin is float) &&
+        data.isCustom is bool &&
+        data.status in ['ativo', 'inativo'];
+    }
+
+    function isValidMaterial(data) {
+      return data.keys().hasAll([
+          'companyId', 'ownerUid', 'name', 'brand', 'materialType', 'color', 'colorHex',
+          'diameterMm', 'initialWeightGrams', 'currentWeightGrams', 'reservedWeightGrams',
+          'emptySpoolWeightGrams', 'acquisitionPrice', 'supplierId', 'supplierName',
+          'purchaseDate', 'minStockGrams', 'storageLocation', 'gramsPerMeter',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'companyId', 'ownerUid', 'name', 'brand', 'materialType', 'color', 'colorHex',
+          'diameterMm', 'initialWeightGrams', 'currentWeightGrams', 'reservedWeightGrams',
+          'emptySpoolWeightGrams', 'acquisitionPrice', 'supplierId', 'supplierName',
+          'purchaseDate', 'minStockGrams', 'storageLocation', 'gramsPerMeter',
+          'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.companyId) &&
+        isValidId(data.ownerUid) &&
+        isStr(data.name, 1, 140) &&
+        isStr(data.brand, 0, 80) &&
+        isStr(data.materialType, 1, 60) &&
+        isStr(data.color, 0, 60) &&
+        isStr(data.colorHex, 0, 20) &&
+        (data.diameterMm == 1.75 || data.diameterMm == 2.85) &&
+        isNum(data.initialWeightGrams, 0) &&
+        isNum(data.currentWeightGrams, 0) &&
+        isNum(data.reservedWeightGrams, 0) &&
+        isNum(data.emptySpoolWeightGrams, 0) &&
+        isNum(data.acquisitionPrice, 0) &&
+        isStr(data.supplierId, 0, 128) &&
+        isStr(data.supplierName, 0, 140) &&
+        isStr(data.purchaseDate, 0, 30) &&
+        isNum(data.minStockGrams, 0) &&
+        isStr(data.storageLocation, 0, 100) &&
+        isNum(data.gramsPerMeter, 0.1);
+    }
+
+    function isValidInventoryMovement(data) {
+      return data.keys().hasAll([
+          'companyId', 'ownerUid', 'materialId', 'materialName', 'type',
+          'quantityGrams', 'previousWeightGrams', 'newWeightGrams', 'unitCostPerGram',
+          'totalCost', 'referenceType', 'referenceId', 'idempotencyKey', 'notes',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'companyId', 'ownerUid', 'materialId', 'materialName', 'type',
+          'quantityGrams', 'previousWeightGrams', 'newWeightGrams', 'unitCostPerGram',
+          'totalCost', 'referenceType', 'referenceId', 'idempotencyKey', 'notes',
+          'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.companyId) &&
+        isValidId(data.ownerUid) &&
+        isValidId(data.materialId) &&
+        isStr(data.materialName, 1, 140) &&
+        data.type in ['entrada', 'consumo', 'desperdicio', 'ajuste', 'devolucao', 'reserva', 'liberacao_reserva'] &&
+        (data.quantityGrams is int || data.quantityGrams is float) &&
+        isNum(data.previousWeightGrams, 0) &&
+        isNum(data.newWeightGrams, 0) &&
+        isNum(data.unitCostPerGram, 0) &&
+        isNum(data.totalCost, 0) &&
+        data.referenceType in ['compra', 'producao', 'pedido', 'manual'] &&
+        isStr(data.referenceId, 0, 128) &&
+        isStr(data.idempotencyKey, 0, 160) &&
+        isStr(data.notes, 0, 500);
+    }
+
+    function isValidPrinter(data) {
+      return data.keys().hasAll([
+          'companyId', 'ownerUid', 'name', 'manufacturer', 'model', 'technology',
+          'filamentDiameterMm', 'serialNumber', 'acquisitionDate', 'acquisitionValue',
+          'estimatedLifespanHours', 'averagePowerWatts', 'status', 'accumulatedHours',
+          'totalPrintCount', 'totalFailureCount', 'lastMaintenanceDate', 'nextMaintenanceDate',
+          'notes', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'companyId', 'ownerUid', 'name', 'manufacturer', 'model', 'technology',
+          'filamentDiameterMm', 'serialNumber', 'acquisitionDate', 'acquisitionValue',
+          'estimatedLifespanHours', 'averagePowerWatts', 'status', 'accumulatedHours',
+          'totalPrintCount', 'totalFailureCount', 'lastMaintenanceDate', 'nextMaintenanceDate',
+          'notes', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.companyId) &&
+        isValidId(data.ownerUid) &&
+        isStr(data.name, 1, 120) &&
+        isStr(data.manufacturer, 0, 80) &&
+        isStr(data.model, 0, 80) &&
+        isStr(data.technology, 1, 40) &&
+        (data.filamentDiameterMm == 1.75 || data.filamentDiameterMm == 2.85) &&
+        isStr(data.serialNumber, 0, 80) &&
+        isStr(data.acquisitionDate, 0, 30) &&
+        isNum(data.acquisitionValue, 0) &&
+        isNum(data.estimatedLifespanHours, 1) &&
+        isNum(data.averagePowerWatts, 0) &&
+        data.status in ['disponivel', 'imprimindo', 'em_manutencao', 'inativa'] &&
+        isNum(data.accumulatedHours, 0) &&
+        isNum(data.totalPrintCount, 0) &&
+        isNum(data.totalFailureCount, 0) &&
+        isStr(data.lastMaintenanceDate, 0, 30) &&
+        isStr(data.nextMaintenanceDate, 0, 30) &&
+        isStr(data.notes, 0, 600);
+    }
+
+    function isValidMaintenanceRecord(data) {
+      return data.keys().hasAll([
+          'companyId', 'ownerUid', 'printerId', 'printerName', 'type', 'description',
+          'cost', 'date', 'nextDueDate', 'status', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'companyId', 'ownerUid', 'printerId', 'printerName', 'type', 'description',
+          'cost', 'date', 'nextDueDate', 'status', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.companyId) &&
+        isValidId(data.ownerUid) &&
+        isValidId(data.printerId) &&
+        isStr(data.printerName, 1, 120) &&
+        data.type in ['preventiva', 'corretiva', 'calibracao', 'falha'] &&
+        isStr(data.description, 1, 1000) &&
+        isNum(data.cost, 0) &&
+        isStr(data.date, 0, 30) &&
+        isStr(data.nextDueDate, 0, 30) &&
+        data.status in ['pendente', 'concluida'];
+    }
+
+    function isValidQuote(data) {
+      return data.keys().hasAll([
+          'companyId', 'ownerUid', 'quoteNumber', 'isSimulation', 'customerId',
+          'customerName', 'title', 'items', 'discount', 'shipping', 'totalCost',
+          'totalPrice', 'estimatedProfit', 'profitMarginPercent', 'validUntil',
+          'status', 'convertedOrderId', 'notes', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'companyId', 'ownerUid', 'quoteNumber', 'isSimulation', 'customerId',
+          'customerName', 'title', 'items', 'discount', 'shipping', 'totalCost',
+          'totalPrice', 'estimatedProfit', 'profitMarginPercent', 'validUntil',
+          'status', 'convertedOrderId', 'notes', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.companyId) &&
+        isValidId(data.ownerUid) &&
+        isStr(data.quoteNumber, 1, 40) &&
+        data.isSimulation is bool &&
+        isStr(data.customerId, 0, 128) &&
+        isStr(data.customerName, 0, 140) &&
+        isStr(data.title, 0, 160) &&
+        isBoundedMapList(data.items, 40) &&
+        isNum(data.discount, 0) &&
+        isNum(data.shipping, 0) &&
+        isNum(data.totalCost, 0) &&
+        isNum(data.totalPrice, 0) &&
+        (data.estimatedProfit is int || data.estimatedProfit is float) &&
+        (data.profitMarginPercent is int || data.profitMarginPercent is float) &&
+        isStr(data.validUntil, 0, 30) &&
+        data.status in ['rascunho', 'novo_orcamento', 'aguardando_aprovacao', 'aprovado', 'convertido', 'rejeitado'] &&
+        isStr(data.convertedOrderId, 0, 128) &&
+        isStr(data.notes, 0, 1000);
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll([
+          'companyId', 'ownerUid', 'orderNumber', 'quoteId', 'customerId', 'customerName',
+          'expectedDeliveryDate', 'items', 'subtotal', 'discount', 'shipping',
+          'totalValue', 'totalCost', 'paidAmount', 'paymentMethod', 'paymentStatus',
+          'status', 'productionGenerated', 'notes', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'companyId', 'ownerUid', 'orderNumber', 'quoteId', 'customerId', 'customerName',
+          'expectedDeliveryDate', 'items', 'subtotal', 'discount', 'shipping',
+          'totalValue', 'totalCost', 'paidAmount', 'paymentMethod', 'paymentStatus',
+          'status', 'productionGenerated', 'notes', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.companyId) &&
+        isValidId(data.ownerUid) &&
+        isStr(data.orderNumber, 1, 40) &&
+        isStr(data.quoteId, 0, 128) &&
+        isStr(data.customerId, 0, 128) &&
+        isStr(data.customerName, 0, 140) &&
+        isStr(data.expectedDeliveryDate, 0, 30) &&
+        isBoundedMapList(data.items, 40) &&
+        isNum(data.subtotal, 0) &&
+        isNum(data.discount, 0) &&
+        isNum(data.shipping, 0) &&
+        isNum(data.totalValue, 0) &&
+        isNum(data.totalCost, 0) &&
+        isNum(data.paidAmount, 0) &&
+        isStr(data.paymentMethod, 0, 60) &&
+        data.paymentStatus in ['pendente', 'parcial', 'pago', 'cancelado'] &&
+        data.status in [
+          'novo_orcamento', 'aguardando_aprovacao', 'aprovado', 'aguardando_producao',
+          'em_producao', 'finalizado', 'pronto_retirada', 'enviado', 'entregue', 'cancelado'
+        ] &&
+        data.productionGenerated is bool &&
+        isStr(data.notes, 0, 1000);
+    }
+
+    function isValidProductionJob(data) {
+      return data.keys().hasAll([
+          'companyId', 'ownerUid', 'orderId', 'orderNumber', 'productId', 'productName',
+          'customerId', 'customerName', 'printerId', 'printerName', 'materialId',
+          'materialName', 'color', 'quantity', 'plannedWeightGrams', 'actualWeightGrams',
+          'wasteWeightGrams', 'reservedWeightGrams', 'estimatedMinutes', 'actualMinutes',
+          'startedAt', 'estimatedFinishAt', 'finishedAt', 'operatorName', 'status',
+          'stockDeducted', 'materialReserved', 'costRecorded', 'actualMaterialCost',
+          'actualEnergyCost', 'actualDepreciationCost', 'totalActualCost',
+          'attemptNumber', 'parentJobId', 'failureReason', 'notes', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'companyId', 'ownerUid', 'orderId', 'orderNumber', 'productId', 'productName',
+          'customerId', 'customerName', 'printerId', 'printerName', 'materialId',
+          'materialName', 'color', 'quantity', 'plannedWeightGrams', 'actualWeightGrams',
+          'wasteWeightGrams', 'reservedWeightGrams', 'estimatedMinutes', 'actualMinutes',
+          'startedAt', 'estimatedFinishAt', 'finishedAt', 'operatorName', 'status',
+          'stockDeducted', 'materialReserved', 'costRecorded', 'actualMaterialCost',
+          'actualEnergyCost', 'actualDepreciationCost', 'totalActualCost',
+          'attemptNumber', 'parentJobId', 'failureReason', 'notes', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.companyId) &&
+        isValidId(data.ownerUid) &&
+        isStr(data.orderId, 0, 128) &&
+        isStr(data.orderNumber, 0, 40) &&
+        isStr(data.productId, 0, 128) &&
+        isStr(data.productName, 1, 160) &&
+        isStr(data.customerId, 0, 128) &&
+        isStr(data.customerName, 0, 140) &&
+        isStr(data.printerId, 0, 128) &&
+        isStr(data.printerName, 0, 120) &&
+        isStr(data.materialId, 0, 128) &&
+        isStr(data.materialName, 0, 140) &&
+        isStr(data.color, 0, 60) &&
+        isNum(data.quantity, 1) &&
+        isNum(data.plannedWeightGrams, 0) &&
+        isNum(data.actualWeightGrams, 0) &&
+        isNum(data.wasteWeightGrams, 0) &&
+        isNum(data.reservedWeightGrams, 0) &&
+        isNum(data.estimatedMinutes, 0) &&
+        isNum(data.actualMinutes, 0) &&
+        isStr(data.startedAt, 0, 40) &&
+        isStr(data.estimatedFinishAt, 0, 40) &&
+        isStr(data.finishedAt, 0, 40) &&
+        isStr(data.operatorName, 0, 100) &&
+        data.status in [
+          'aguardando_producao', 'na_fila', 'preparando_impressao', 'imprimindo',
+          'pausado', 'falha_impressao', 'finalizado', 'cancelado'
+        ] &&
+        data.stockDeducted is bool &&
+        data.materialReserved is bool &&
+        data.costRecorded is bool &&
+        isNum(data.actualMaterialCost, 0) &&
+        isNum(data.actualEnergyCost, 0) &&
+        isNum(data.actualDepreciationCost, 0) &&
+        isNum(data.totalActualCost, 0) &&
+        isNum(data.attemptNumber, 1) &&
+        isStr(data.parentJobId, 0, 128) &&
+        isStr(data.failureReason, 0, 400) &&
+        isStr(data.notes, 0, 1000);
+    }
+
+    function isValidTransaction(data) {
+      return data.keys().hasAll([
+          'companyId', 'ownerUid', 'type', 'category', 'description', 'amount',
+          'dueDate', 'paymentDate', 'paymentMethod', 'status', 'orderId',
+          'orderNumber', 'purchaseId', 'isProductionCost', 'idempotencyKey',
+          'notes', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'companyId', 'ownerUid', 'type', 'category', 'description', 'amount',
+          'dueDate', 'paymentDate', 'paymentMethod', 'status', 'orderId',
+          'orderNumber', 'purchaseId', 'isProductionCost', 'idempotencyKey',
+          'notes', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.companyId) &&
+        isValidId(data.ownerUid) &&
+        data.type in ['receita', 'despesa'] &&
+        isStr(data.category, 1, 80) &&
+        isStr(data.description, 1, 240) &&
+        isNum(data.amount, 0) &&
+        isStr(data.dueDate, 0, 30) &&
+        isStr(data.paymentDate, 0, 30) &&
+        isStr(data.paymentMethod, 0, 60) &&
+        data.status in ['pendente', 'pago', 'atrasado', 'cancelado'] &&
+        isStr(data.orderId, 0, 128) &&
+        isStr(data.orderNumber, 0, 40) &&
+        isStr(data.purchaseId, 0, 128) &&
+        data.isProductionCost is bool &&
+        isStr(data.idempotencyKey, 0, 160) &&
+        isStr(data.notes, 0, 600);
+    }
+
+    function isValidExpense(data) {
+      return data.keys().hasAll([
+          'companyId', 'ownerUid', 'description', 'category', 'amount', 'dueDate',
+          'paymentDate', 'paymentMethod', 'status', 'orderId', 'purchaseId',
+          'supplierId', 'notes', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'companyId', 'ownerUid', 'description', 'category', 'amount', 'dueDate',
+          'paymentDate', 'paymentMethod', 'status', 'orderId', 'purchaseId',
+          'supplierId', 'notes', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.companyId) &&
+        isValidId(data.ownerUid) &&
+        isStr(data.description, 1, 240) &&
+        isStr(data.category, 1, 80) &&
+        isNum(data.amount, 0) &&
+        isStr(data.dueDate, 0, 30) &&
+        isStr(data.paymentDate, 0, 30) &&
+        isStr(data.paymentMethod, 0, 60) &&
+        data.status in ['pendente', 'pago', 'atrasado', 'cancelado'] &&
+        isStr(data.orderId, 0, 128) &&
+        isStr(data.purchaseId, 0, 128) &&
+        isStr(data.supplierId, 0, 128) &&
+        isStr(data.notes, 0, 600);
+    }
+
+    function isValidSupplier(data) {
+      return data.keys().hasAll([
+          'companyId', 'ownerUid', 'name', 'document', 'contactName', 'phone',
+          'whatsapp', 'email', 'address', 'notes', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'companyId', 'ownerUid', 'name', 'document', 'contactName', 'phone',
+          'whatsapp', 'email', 'address', 'notes', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.companyId) &&
+        isValidId(data.ownerUid) &&
+        isStr(data.name, 1, 140) &&
+        isStr(data.document, 0, 24) &&
+        isStr(data.contactName, 0, 120) &&
+        isStr(data.phone, 0, 30) &&
+        isStr(data.whatsapp, 0, 30) &&
+        isStr(data.email, 0, 160) &&
+        isStr(data.address, 0, 240) &&
+        isStr(data.notes, 0, 1000);
+    }
+
+    function isValidPurchase(data) {
+      return data.keys().hasAll([
+          'companyId', 'ownerUid', 'purchaseNumber', 'supplierId', 'supplierName',
+          'items', 'shipping', 'totalValue', 'purchaseDate', 'paymentMethod',
+          'status', 'stockUpdated', 'notes', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'companyId', 'ownerUid', 'purchaseNumber', 'supplierId', 'supplierName',
+          'items', 'shipping', 'totalValue', 'purchaseDate', 'paymentMethod',
+          'status', 'stockUpdated', 'notes', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.companyId) &&
+        isValidId(data.ownerUid) &&
+        isStr(data.purchaseNumber, 1, 40) &&
+        isStr(data.supplierId, 0, 128) &&
+        isStr(data.supplierName, 0, 140) &&
+        isBoundedMapList(data.items, 40) &&
+        isNum(data.shipping, 0) &&
+        isNum(data.totalValue, 0) &&
+        isStr(data.purchaseDate, 0, 30) &&
+        isStr(data.paymentMethod, 0, 60) &&
+        data.status in ['pendente', 'recebido', 'cancelado'] &&
+        data.stockUpdated is bool &&
+        isStr(data.notes, 0, 600);
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll([
+          'companyId', 'ownerUid', 'title', 'message', 'type', 'severity',
+          'referenceId', 'isRead', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'companyId', 'ownerUid', 'title', 'message', 'type', 'severity',
+          'referenceId', 'isRead', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.companyId) &&
+        isValidId(data.ownerUid) &&
+        isStr(data.title, 1, 140) &&
+        isStr(data.message, 1, 400) &&
+        data.type in ['estoque_baixo', 'prazo_proximo', 'pedido_atrasado', 'manutencao', 'conta_vencendo', 'falha_impressao', 'sistema'] &&
+        data.severity in ['info', 'warning', 'danger'] &&
+        isStr(data.referenceId, 0, 128) &&
+        data.isRead is bool;
+    }
+
+    // =========================================================================
+    // 4. COLLECTION MATCH BLOCKS
+    // =========================================================================
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && isValidId(userId) && userId == request.auth.uid &&
+        isValidUser(incoming(), userId) && isCreateTimestamps() &&
+        incoming().role == 'owner' && incoming().companyId == userId;
+      allow update: if isVerifiedUser() && isValidId(userId) && isValidUser(incoming(), userId) && (
+        isAdmin() || (
+          userId == request.auth.uid &&
+          incoming().uid == existing().uid &&
+          incoming().companyId == existing().companyId &&
+          incoming().role == existing().role &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'email', 'updatedAt'])
+        )
+      );
+      allow delete: if isAdmin() && isValidId(userId);
+    }
+
+    match /companies/{companyId} {
+      allow get: if isSignedIn() && isValidId(companyId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && isValidId(companyId) &&
+        isValidCompany(incoming()) && isCreateTimestamps() &&
+        incoming().ownerUid == request.auth.uid;
+      allow update: if isVerifiedUser() && isValidId(companyId) && isValidCompany(incoming()) && (
+        isAdmin() || (
+          existing().ownerUid == request.auth.uid &&
+          incoming().ownerUid == existing().ownerUid &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'cnpj', 'phone', 'email', 'address', 'logoUrl', 'updatedAt'])
+        )
+      );
+      allow delete: if isAdmin() && isValidId(companyId);
+
+      match /members/{memberId} {
+        allow get: if isSignedIn() && isValidId(companyId) && isValidId(memberId) && (existing().ownerUid == request.auth.uid || isAdmin());
+        allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+        allow create: if isVerifiedUser() && isValidId(companyId) && isValidId(memberId) &&
+          isValidCompanyMember(incoming()) && isCreateTimestamps() &&
+          incoming().companyId == companyId && incoming().ownerUid == request.auth.uid &&
+          isCompanyOwner(companyId);
+        allow update: if isVerifiedUser() && isValidId(companyId) && isValidId(memberId) &&
+          isValidCompanyMember(incoming()) && (
+            isAdmin() || (
+              existing().ownerUid == request.auth.uid &&
+              isImmutableTenantFields() &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['name', 'email', 'role', 'status', 'permissions', 'updatedAt'])
+            )
+          );
+        allow delete: if isVerifiedUser() && isValidId(companyId) && isValidId(memberId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      }
+    }
+
+    match /settings/{companyId} {
+      allow get: if isSignedIn() && isValidId(companyId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && isValidId(companyId) &&
+        isValidSettings(incoming()) && isCreateTimestamps() &&
+        incoming().companyId == companyId && incoming().ownerUid == request.auth.uid &&
+        isCompanyOwner(companyId);
+      allow update: if isVerifiedUser() && isValidId(companyId) && isValidSettings(incoming()) && (
+        isAdmin() || (
+          existing().ownerUid == request.auth.uid && isImmutableTenantFields() && (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'energyTariffPerKwh', 'defaultProfitMargin', 'defaultPaymentFeePercent',
+              'defaultHourlyLaborRate', 'defaultPackagingCost', 'lowStockThresholdGrams',
+              'currency', 'materialTypes', 'expenseCategories', 'materialDensities', 'updatedAt'
+            ]) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['orderCounter', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['quoteCounter', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['purchaseCounter', 'updatedAt'])
+          )
+        )
+      );
+      allow delete: if isAdmin() && isValidId(companyId);
+    }
+
+    match /customers/{customerId} {
+      allow get: if isSignedIn() && isValidId(customerId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && isValidId(customerId) &&
+        isValidCustomer(incoming()) && isCreateTimestamps() &&
+        incoming().ownerUid == request.auth.uid && isCompanyOwner(incoming().companyId);
+      allow update: if isVerifiedUser() && isValidId(customerId) && isValidCustomer(incoming()) && (
+        isAdmin() || (
+          existing().ownerUid == request.auth.uid && isImmutableTenantFields() && (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'fullName', 'document', 'phone', 'whatsapp', 'email',
+              'address', 'city', 'state', 'notes', 'updatedAt'
+            ]) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['isArchived', 'updatedAt'])
+          )
+        )
+      );
+      allow delete: if isVerifiedUser() && isValidId(customerId) && (existing().ownerUid == request.auth.uid || isAdmin());
+    }
+
+    match /products/{productId} {
+      allow get: if isSignedIn() && isValidId(productId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && isValidId(productId) &&
+        isValidProduct(incoming()) && isCreateTimestamps() &&
+        incoming().ownerUid == request.auth.uid && isCompanyOwner(incoming().companyId);
+      allow update: if isVerifiedUser() && isValidId(productId) && isValidProduct(incoming()) && (
+        isAdmin() || (
+          existing().ownerUid == request.auth.uid && isImmutableTenantFields() && (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'name', 'sku', 'description', 'photoUrls', 'category', 'modelFileUrl',
+              'modelFileName', 'material', 'color', 'estimatedWeightGrams',
+              'estimatedLengthMeters', 'estimatedTimeMinutes', 'recommendedPrinterId',
+              'recommendedPrinterName', 'manufacturingCost', 'salePrice', 'profitMargin',
+              'isCustom', 'status', 'updatedAt'
+            ]) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+          )
+        )
+      );
+      allow delete: if isVerifiedUser() && isValidId(productId) && (existing().ownerUid == request.auth.uid || isAdmin());
+    }
+
+    match /materials/{materialId} {
+      allow get: if isSignedIn() && isValidId(materialId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && isValidId(materialId) &&
+        isValidMaterial(incoming()) && isCreateTimestamps() &&
+        incoming().ownerUid == request.auth.uid && isCompanyOwner(incoming().companyId);
+      allow update: if isVerifiedUser() && isValidId(materialId) && isValidMaterial(incoming()) && (
+        isAdmin() || (
+          existing().ownerUid == request.auth.uid && isImmutableTenantFields() && (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'name', 'brand', 'materialType', 'color', 'colorHex', 'diameterMm',
+              'initialWeightGrams', 'emptySpoolWeightGrams', 'acquisitionPrice',
+              'supplierId', 'supplierName', 'purchaseDate', 'minStockGrams',
+              'storageLocation', 'gramsPerMeter', 'updatedAt'
+            ]) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['currentWeightGrams', 'reservedWeightGrams', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['currentWeightGrams', 'acquisitionPrice', 'purchaseDate', 'supplierId', 'supplierName', 'updatedAt'])
+          )
+        )
+      );
+      allow delete: if isVerifiedUser() && isValidId(materialId) && (existing().ownerUid == request.auth.uid || isAdmin());
+    }
+
+    match /inventoryMovements/{movementId} {
+      allow get: if isSignedIn() && isValidId(movementId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && isValidId(movementId) &&
+        isValidInventoryMovement(incoming()) && isCreateTimestamps() &&
+        incoming().ownerUid == request.auth.uid && isCompanyOwner(incoming().companyId);
+      allow update: if isAdmin() && isValidId(movementId) && isValidInventoryMovement(incoming());
+      allow delete: if isAdmin() && isValidId(movementId);
+    }
+
+    match /printers/{printerId} {
+      allow get: if isSignedIn() && isValidId(printerId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && isValidId(printerId) &&
+        isValidPrinter(incoming()) && isCreateTimestamps() &&
+        incoming().ownerUid == request.auth.uid && isCompanyOwner(incoming().companyId);
+      allow update: if isVerifiedUser() && isValidId(printerId) && isValidPrinter(incoming()) && (
+        isAdmin() || (
+          existing().ownerUid == request.auth.uid && isImmutableTenantFields() && (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'name', 'manufacturer', 'model', 'technology', 'filamentDiameterMm',
+              'serialNumber', 'acquisitionDate', 'acquisitionValue', 'estimatedLifespanHours',
+              'averagePowerWatts', 'status', 'lastMaintenanceDate', 'nextMaintenanceDate',
+              'notes', 'updatedAt'
+            ]) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'accumulatedHours', 'totalPrintCount', 'totalFailureCount', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'lastMaintenanceDate', 'nextMaintenanceDate', 'updatedAt'])
+          )
+        )
+      );
+      allow delete: if isVerifiedUser() && isValidId(printerId) && (existing().ownerUid == request.auth.uid || isAdmin());
+    }
+
+    match /maintenanceRecords/{recordId} {
+      allow get: if isSignedIn() && isValidId(recordId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && isValidId(recordId) &&
+        isValidMaintenanceRecord(incoming()) && isCreateTimestamps() &&
+        incoming().ownerUid == request.auth.uid && isCompanyOwner(incoming().companyId);
+      allow update: if isVerifiedUser() && isValidId(recordId) && isValidMaintenanceRecord(incoming()) && (
+        isAdmin() || (
+          existing().ownerUid == request.auth.uid && isImmutableTenantFields() &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'description', 'cost', 'date', 'nextDueDate', 'updatedAt'])
+        )
+      );
+      allow delete: if isVerifiedUser() && isValidId(recordId) && (existing().ownerUid == request.auth.uid || isAdmin());
+    }
+
+    match /quotes/{quoteId} {
+      allow get: if isSignedIn() && isValidId(quoteId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && isValidId(quoteId) &&
+        isValidQuote(incoming()) && isCreateTimestamps() &&
+        incoming().ownerUid == request.auth.uid && isCompanyOwner(incoming().companyId);
+      allow update: if isVerifiedUser() && isValidId(quoteId) && isValidQuote(incoming()) && (
+        isAdmin() || (
+          existing().ownerUid == request.auth.uid && isImmutableTenantFields() &&
+          existing().status != 'convertido' && existing().status != 'rejeitado' && (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'customerId', 'customerName', 'title', 'items', 'discount', 'shipping',
+              'totalCost', 'totalPrice', 'estimatedProfit', 'profitMarginPercent',
+              'validUntil', 'status', 'notes', 'updatedAt'
+            ]) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'convertedOrderId', 'updatedAt'])
+          )
+        )
+      );
+      allow delete: if isVerifiedUser() && isValidId(quoteId) && (existing().ownerUid == request.auth.uid || isAdmin());
+    }
+
+    match /orders/{orderId} {
+      allow get: if isSignedIn() && isValidId(orderId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && isValidId(orderId) &&
+        isValidOrder(incoming()) && isCreateTimestamps() &&
+        incoming().ownerUid == request.auth.uid && isCompanyOwner(incoming().companyId);
+      allow update: if isVerifiedUser() && isValidId(orderId) && isValidOrder(incoming()) && (
+        isAdmin() || (
+          existing().ownerUid == request.auth.uid && isImmutableTenantFields() &&
+          existing().status != 'cancelado' && (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'customerId', 'customerName', 'expectedDeliveryDate', 'items',
+              'subtotal', 'discount', 'shipping', 'totalValue', 'totalCost',
+              'paymentMethod', 'notes', 'updatedAt'
+            ]) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'productionGenerated', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['paidAmount', 'paymentStatus', 'paymentMethod', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paymentStatus', 'updatedAt'])
+          )
+        )
+      );
+      allow delete: if isVerifiedUser() && isValidId(orderId) && (existing().ownerUid == request.auth.uid || isAdmin());
+    }
+
+    match /productionJobs/{jobId} {
+      allow get: if isSignedIn() && isValidId(jobId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && isValidId(jobId) &&
+        isValidProductionJob(incoming()) && isCreateTimestamps() &&
+        incoming().ownerUid == request.auth.uid && isCompanyOwner(incoming().companyId);
+      allow update: if isVerifiedUser() && isValidId(jobId) && isValidProductionJob(incoming()) && (
+        isAdmin() || (
+          existing().ownerUid == request.auth.uid && isImmutableTenantFields() &&
+          existing().status != 'finalizado' && existing().status != 'cancelado' && (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'printerId', 'printerName', 'materialId', 'materialName', 'color',
+              'status', 'operatorName', 'startedAt', 'estimatedFinishAt',
+              'materialReserved', 'reservedWeightGrams', 'notes', 'updatedAt'
+            ]) ||
+            (
+              existing().stockDeducted == false &&
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'status', 'actualWeightGrams', 'wasteWeightGrams', 'actualMinutes',
+                'finishedAt', 'stockDeducted', 'materialReserved', 'reservedWeightGrams',
+                'costRecorded', 'actualMaterialCost', 'actualEnergyCost',
+                'actualDepreciationCost', 'totalActualCost', 'notes', 'updatedAt'
+              ])
+            ) ||
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'actualWeightGrams', 'wasteWeightGrams', 'actualMinutes',
+              'finishedAt', 'stockDeducted', 'materialReserved', 'reservedWeightGrams',
+              'costRecorded', 'actualMaterialCost', 'actualEnergyCost',
+              'actualDepreciationCost', 'totalActualCost', 'failureReason', 'notes', 'updatedAt'
+            ])
+          )
+        )
+      );
+      allow delete: if isVerifiedUser() && isValidId(jobId) && (existing().ownerUid == request.auth.uid || isAdmin());
+    }
+
+    match /transactions/{transactionId} {
+      allow get: if isSignedIn() && isValidId(transactionId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && isValidId(transactionId) &&
+        isValidTransaction(incoming()) && isCreateTimestamps() &&
+        incoming().ownerUid == request.auth.uid && isCompanyOwner(incoming().companyId);
+      allow update: if isVerifiedUser() && isValidId(transactionId) && isValidTransaction(incoming()) && (
+        isAdmin() || (
+          existing().ownerUid == request.auth.uid && isImmutableTenantFields() &&
+          existing().status != 'cancelado' &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'description', 'category', 'amount', 'dueDate', 'paymentDate',
+            'paymentMethod', 'status', 'notes', 'updatedAt'
+          ])
+        )
+      );
+      allow delete: if isVerifiedUser() && isValidId(transactionId) && (existing().ownerUid == request.auth.uid || isAdmin());
+    }
+
+    match /expenses/{expenseId} {
+      allow get: if isSignedIn() && isValidId(expenseId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && isValidId(expenseId) &&
+        isValidExpense(incoming()) && isCreateTimestamps() &&
+        incoming().ownerUid == request.auth.uid && isCompanyOwner(incoming().companyId);
+      allow update: if isVerifiedUser() && isValidId(expenseId) && isValidExpense(incoming()) && (
+        isAdmin() || (
+          existing().ownerUid == request.auth.uid && isImmutableTenantFields() &&
+          existing().status != 'cancelado' &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'description', 'category', 'amount', 'dueDate', 'paymentDate',
+            'paymentMethod', 'status', 'supplierId', 'notes', 'updatedAt'
+          ])
+        )
+      );
+      allow delete: if isVerifiedUser() && isValidId(expenseId) && (existing().ownerUid == request.auth.uid || isAdmin());
+    }
+
+    match /suppliers/{supplierId} {
+      allow get: if isSignedIn() && isValidId(supplierId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && isValidId(supplierId) &&
+        isValidSupplier(incoming()) && isCreateTimestamps() &&
+        incoming().ownerUid == request.auth.uid && isCompanyOwner(incoming().companyId);
+      allow update: if isVerifiedUser() && isValidId(supplierId) && isValidSupplier(incoming()) && (
+        isAdmin() || (
+          existing().ownerUid == request.auth.uid && isImmutableTenantFields() &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'document', 'contactName', 'phone', 'whatsapp', 'email',
+            'address', 'notes', 'updatedAt'
+          ])
+        )
+      );
+      allow delete: if isVerifiedUser() && isValidId(supplierId) && (existing().ownerUid == request.auth.uid || isAdmin());
+    }
+
+    match /purchases/{purchaseId} {
+      allow get: if isSignedIn() && isValidId(purchaseId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && isValidId(purchaseId) &&
+        isValidPurchase(incoming()) && isCreateTimestamps() &&
+        incoming().ownerUid == request.auth.uid && isCompanyOwner(incoming().companyId);
+      allow update: if isVerifiedUser() && isValidId(purchaseId) && isValidPurchase(incoming()) && (
+        isAdmin() || (
+          existing().ownerUid == request.auth.uid && isImmutableTenantFields() &&
+          existing().status == 'pendente' && (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'supplierId', 'supplierName', 'items', 'shipping', 'totalValue',
+              'purchaseDate', 'paymentMethod', 'notes', 'updatedAt'
+            ]) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'stockUpdated', 'updatedAt'])
+          )
+        )
+      );
+      allow delete: if isVerifiedUser() && isValidId(purchaseId) && (existing().ownerUid == request.auth.uid || isAdmin());
+    }
+
+    match /notifications/{notificationId} {
+      allow get: if isSignedIn() && isValidId(notificationId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && isValidId(notificationId) &&
+        isValidNotification(incoming()) && isCreateTimestamps() &&
+        incoming().ownerUid == request.auth.uid && isCompanyOwner(incoming().companyId);
+      allow update: if isVerifiedUser() && isValidId(notificationId) && isValidNotification(incoming()) && (
+        isAdmin() || (
+          existing().ownerUid == request.auth.uid && isImmutableTenantFields() &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['isRead', 'updatedAt'])
+        )
+      );
+      allow delete: if isVerifiedUser() && isValidId(notificationId) && (existing().ownerUid == request.auth.uid || isAdmin());
+    }
+  }
+}

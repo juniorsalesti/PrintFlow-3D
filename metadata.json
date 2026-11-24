@@ -1,0 +1,8 @@
+{
+  "name": "PrintFlow 3D",
+  "description": "ERP especializado em gestão empresarial para empresas de impressão 3D: clientes, orçamentos, pedidos, produção, impressoras, filamentos, custos e financeiro.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
