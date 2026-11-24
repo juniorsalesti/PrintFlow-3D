@@ -27,6 +27,7 @@ import {
   formatBRL,
   formatDateBR,
   getTodayISO,
+  toDateObject,
 } from '../../utils/formatters';
 import {
   ConfirmModal,
@@ -82,6 +83,7 @@ export const OrdersModule: React.FC = () => {
   const [autoGenerateProd, setAutoGenerateProd] = useState(true);
   const [items, setItems] = useState<OrderItem[]>([]);
   const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const [payOrder, setPayOrder] = useState<Order | null>(null);
   const [payAmount, setPayAmount] = useState(0);
@@ -119,6 +121,7 @@ export const OrdersModule: React.FC = () => {
 
   const openCreate = () => {
     setEditing(null);
+    setFormError(null);
     setCustomerId('');
     setExpectedDeliveryDate(addDaysISO(7));
     setPaymentMethod('PIX');
@@ -133,6 +136,7 @@ export const OrdersModule: React.FC = () => {
 
   const openEdit = (o: Order) => {
     setEditing(o);
+    setFormError(null);
     setCustomerId(o.customerId);
     setExpectedDeliveryDate(o.expectedDeliveryDate || addDaysISO(7));
     setPaymentMethod(o.paymentMethod || 'PIX');
@@ -182,20 +186,24 @@ export const OrdersModule: React.FC = () => {
     setItems((prev) =>
       prev.map((row, i) => {
         if (i !== idx) return row;
+        const unitCost = Math.max(0, Number(p.manufacturingCost) || 0);
+        const unitPrice = Math.max(0, Number(p.salePrice) || 0);
+        const weight = Math.max(0, Number(p.estimatedWeightGrams) || 0);
+        const time = Math.max(0, Number(p.estimatedTimeMinutes) || 0);
         return {
           ...row,
           productId: p.id,
           productName: p.name,
-          isCustom: p.isCustom,
+          isCustom: Boolean(p.isCustom),
           materialName: p.material || row.materialName,
           color: p.color || row.color,
           printerId: p.recommendedPrinterId || row.printerId,
           printerName: p.recommendedPrinterName || row.printerName,
-          weightGrams: p.estimatedWeightGrams * row.quantity,
-          printTimeMinutes: p.estimatedTimeMinutes * row.quantity,
-          unitCost: p.manufacturingCost,
-          unitPrice: p.salePrice,
-          totalPrice: Number((p.salePrice * row.quantity).toFixed(2)),
+          weightGrams: Number((weight * row.quantity).toFixed(2)),
+          printTimeMinutes: Math.round(time * row.quantity),
+          unitCost,
+          unitPrice,
+          totalPrice: Number((unitPrice * row.quantity).toFixed(2)),
         };
       })
     );
@@ -206,6 +214,10 @@ export const OrdersModule: React.FC = () => {
       prev.map((row, i) => {
         if (i !== idx) return row;
         const next = { ...row, ...patch };
+        next.quantity = Math.max(1, Math.round(Number(next.quantity) || 1));
+        next.weightGrams = Math.max(0, Number.isFinite(Number(next.weightGrams)) ? Number(next.weightGrams) : 0);
+        next.unitPrice = Math.max(0, Number.isFinite(Number(next.unitPrice)) ? Number(next.unitPrice) : 0);
+        next.unitCost = Math.max(0, Number.isFinite(Number(next.unitCost)) ? Number(next.unitCost) : 0);
         next.totalPrice = Number((next.quantity * next.unitPrice).toFixed(2));
         return next;
       })
@@ -215,28 +227,57 @@ export const OrdersModule: React.FC = () => {
   const totals = useMemo(() => {
     const subtotal = items.reduce((acc, i) => acc + i.totalPrice, 0);
     const totalCost = items.reduce((acc, i) => acc + i.unitCost * i.quantity, 0);
-    const totalValue = Math.max(0, Number((subtotal - discount + shipping).toFixed(2)));
+    const safeDiscount = Math.max(0, Number(discount) || 0);
+    const safeShipping = Math.max(0, Number(shipping) || 0);
+    const totalValue = Math.max(0, Number((subtotal - safeDiscount + safeShipping).toFixed(2)));
     return { subtotal, totalCost, totalValue };
   }, [items, discount, shipping]);
 
   const filteredOrders = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return orders.filter((o) => {
-      if (statusFilter !== 'todos' && o.status !== statusFilter) return false;
-      if (!term) return true;
-      return (
-        o.orderNumber.toLowerCase().includes(term) ||
-        o.customerName.toLowerCase().includes(term) ||
-        o.items.some((i) => i.productName.toLowerCase().includes(term))
-      );
-    });
+    return orders
+      .filter((o) => {
+        if (statusFilter !== 'todos' && o.status !== statusFilter) return false;
+        if (!term) return true;
+        return (
+          o.orderNumber.toLowerCase().includes(term) ||
+          o.customerName.toLowerCase().includes(term) ||
+          o.items.some((i) => i.productName.toLowerCase().includes(term))
+        );
+      })
+      .sort((a, b) => {
+        const ta = toDateObject(a.createdAt)?.getTime() || 0;
+        const tb = toDateObject(b.createdAt)?.getTime() || 0;
+        return tb - ta;
+      });
   }, [orders, search, statusFilter]);
+
+  const extractReadableError = (err: unknown, fallback: string): string => {
+    if (!(err instanceof Error)) return fallback;
+    try {
+      const parsed = JSON.parse(err.message) as { error?: string; path?: string };
+      if (parsed && parsed.error) {
+        return `Erro ao salvar no banco (${parsed.path || 'orders'}): ${parsed.error}`;
+      }
+    } catch {
+      // plain error string
+    }
+    return err.message || fallback;
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant) return;
+    setFormError(null);
+    if (!tenant) {
+      const msg = 'Sessão da empresa ainda está carregando. Aguarde um instante e tente novamente.';
+      setFormError(msg);
+      showToast(msg, 'error');
+      return;
+    }
     if (items.length === 0 || items.some((i) => !i.productName.trim())) {
-      showToast('Preencha todos os itens do pedido.', 'error');
+      const msg = 'Informe a descrição de todas as peças do pedido.';
+      setFormError(msg);
+      showToast(msg, 'error');
       return;
     }
     setSaving(true);
@@ -251,8 +292,8 @@ export const OrdersModule: React.FC = () => {
           expectedDeliveryDate,
           items,
           subtotal: totals.subtotal,
-          discount,
-          shipping,
+          discount: Math.max(0, Number(discount) || 0),
+          shipping: Math.max(0, Number(shipping) || 0),
           totalValue: totals.totalValue,
           totalCost: totals.totalCost,
           paymentMethod,
@@ -265,7 +306,9 @@ export const OrdersModule: React.FC = () => {
       showToast(editing ? 'Pedido atualizado.' : 'Pedido criado com sucesso.');
       setModalOpen(false);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao salvar pedido.', 'error');
+      const msg = extractReadableError(err, 'Erro ao salvar pedido.');
+      setFormError(msg);
+      showToast(msg, 'error');
     } finally {
       setSaving(false);
     }
@@ -431,8 +474,15 @@ export const OrdersModule: React.FC = () => {
                           <select
                             value={o.status}
                             onChange={async (e) => {
-                              await updateOrderStatus(o.id, e.target.value as OrderStatus);
-                              showToast(`Status do ${o.orderNumber} atualizado.`);
+                              try {
+                                await updateOrderStatus(o.id, e.target.value as OrderStatus);
+                                showToast(`Status do ${o.orderNumber} atualizado.`);
+                              } catch (err) {
+                                showToast(
+                                  extractReadableError(err, 'Erro ao atualizar status do pedido.'),
+                                  'error'
+                                );
+                              }
                             }}
                             className="bg-[#101114] border border-[#282C35] rounded-md px-2 py-1 text-xs text-[#F5F5F5] outline-none"
                           >
@@ -653,9 +703,12 @@ export const OrdersModule: React.FC = () => {
                   <label className={labelClass}>Peso tot. (g)</label>
                   <input
                     type="number"
+                    step="any"
                     min="0"
                     value={item.weightGrams}
-                    onChange={(e) => updateItem(idx, { weightGrams: Number(e.target.value) })}
+                    onChange={(e) =>
+                      updateItem(idx, { weightGrams: Math.max(0, Number(e.target.value) || 0) })
+                    }
                     className={inputClass}
                   />
                 </div>
@@ -666,7 +719,9 @@ export const OrdersModule: React.FC = () => {
                     step="0.01"
                     min="0"
                     value={item.unitPrice}
-                    onChange={(e) => updateItem(idx, { unitPrice: Number(e.target.value) })}
+                    onChange={(e) =>
+                      updateItem(idx, { unitPrice: Math.max(0, Number(e.target.value) || 0) })
+                    }
                     className={inputClass}
                   />
                 </div>
@@ -693,7 +748,7 @@ export const OrdersModule: React.FC = () => {
                 step="0.01"
                 min="0"
                 value={discount}
-                onChange={(e) => setDiscount(Number(e.target.value))}
+                onChange={(e) => setDiscount(Math.max(0, Number(e.target.value) || 0))}
                 className={inputClass}
               />
             </div>
@@ -704,7 +759,7 @@ export const OrdersModule: React.FC = () => {
                 step="0.01"
                 min="0"
                 value={shipping}
-                onChange={(e) => setShipping(Number(e.target.value))}
+                onChange={(e) => setShipping(Math.max(0, Number(e.target.value) || 0))}
                 className={inputClass}
               />
             </div>
@@ -737,6 +792,12 @@ export const OrdersModule: React.FC = () => {
               className={inputClass}
             />
           </div>
+
+          {formError && (
+            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-300 leading-relaxed break-words">
+              {formError}
+            </div>
+          )}
 
           <div className="flex items-center justify-end gap-3 pt-2">
             <button

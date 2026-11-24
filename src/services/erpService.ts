@@ -103,26 +103,49 @@ export async function ensureCompanyBootstrap(user: User): Promise<{
     }
 
     const settingsSnap = await getDoc(settingsRef);
+    const defaultSettingsPayload = {
+      companyId: uid,
+      ownerUid: uid,
+      energyTariffPerKwh: 0.92,
+      defaultProfitMargin: 45,
+      defaultPaymentFeePercent: 3.5,
+      defaultHourlyLaborRate: 25,
+      defaultPackagingCost: 4.5,
+      lowStockThresholdGrams: 250,
+      currency: 'BRL',
+      orderCounter: 0,
+      quoteCounter: 0,
+      purchaseCounter: 0,
+      materialTypes: DEFAULT_MATERIAL_TYPES,
+      expenseCategories: DEFAULT_EXPENSE_CATEGORIES,
+      materialDensities: DEFAULT_MATERIAL_DENSITIES,
+    };
     if (!settingsSnap.exists()) {
       await setDoc(settingsRef, {
-        companyId: uid,
-        ownerUid: uid,
-        energyTariffPerKwh: 0.92,
-        defaultProfitMargin: 45,
-        defaultPaymentFeePercent: 3.5,
-        defaultHourlyLaborRate: 25,
-        defaultPackagingCost: 4.5,
-        lowStockThresholdGrams: 250,
-        currency: 'BRL',
-        orderCounter: 0,
-        quoteCounter: 0,
-        purchaseCounter: 0,
-        materialTypes: DEFAULT_MATERIAL_TYPES,
-        expenseCategories: DEFAULT_EXPENSE_CATEGORIES,
-        materialDensities: DEFAULT_MATERIAL_DENSITIES,
+        ...defaultSettingsPayload,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
+    } else {
+      const existingData = settingsSnap.data() as Record<string, unknown>;
+      const patch: Record<string, unknown> = {};
+      (Object.keys(defaultSettingsPayload) as Array<keyof typeof defaultSettingsPayload>).forEach(
+        (key) => {
+          if (existingData[key] === undefined) {
+            patch[key] = defaultSettingsPayload[key];
+          }
+        }
+      );
+      if (Object.keys(patch).length > 0) {
+        await setDoc(
+          settingsRef,
+          {
+            ...patch,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
     }
 
     // Ensure initial printer Creality Ender 3 V2 exists when workspace has zero printers
@@ -995,6 +1018,34 @@ export async function deleteQuote(quoteId: string): Promise<void> {
 }
 
 // ORDERS
+function sanitizeOrderItems(items: Order['items']): Order['items'] {
+  return (items || []).slice(0, 40).map((item) => {
+    const quantity = Math.max(1, Math.round(Number(item.quantity) || 1));
+    const unitPrice = Math.max(0, Number.isFinite(Number(item.unitPrice)) ? Number(item.unitPrice) : 0);
+    const unitCost = Math.max(0, Number.isFinite(Number(item.unitCost)) ? Number(item.unitCost) : 0);
+    return {
+      id: String(item.id || createEntityId('oi')).slice(0, 128),
+      productId: String(item.productId || '').slice(0, 128),
+      productName: String(item.productName || 'Peça 3D').trim().slice(0, 160) || 'Peça 3D',
+      isCustom: Boolean(item.isCustom),
+      materialId: String(item.materialId || '').slice(0, 128),
+      materialName: String(item.materialName || '').trim().slice(0, 140),
+      color: String(item.color || '').trim().slice(0, 60),
+      printerId: String(item.printerId || '').slice(0, 128),
+      printerName: String(item.printerName || '').trim().slice(0, 120),
+      quantity,
+      weightGrams: Math.max(0, Number.isFinite(Number(item.weightGrams)) ? Number(item.weightGrams) : 0),
+      printTimeMinutes: Math.max(
+        0,
+        Number.isFinite(Number(item.printTimeMinutes)) ? Math.round(Number(item.printTimeMinutes)) : 0
+      ),
+      unitCost,
+      unitPrice,
+      totalPrice: Number((quantity * unitPrice).toFixed(2)),
+    };
+  });
+}
+
 export async function saveOrder(
   tenant: TenantContext,
   data: Omit<
@@ -1014,20 +1065,31 @@ export async function saveOrder(
 ): Promise<string> {
   const id = existingId || createEntityId('ped');
   const path = `orders/${id}`;
+  const cleanItems = sanitizeOrderItems(data.items);
+  const cleanCustomerName = (data.customerName || 'Cliente Avulso').trim().slice(0, 140) || 'Cliente Avulso';
+  const cleanNotes = (data.notes || '').trim().slice(0, 1000);
+  const cleanDeliveryDate = String(data.expectedDeliveryDate || '').slice(0, 30);
+  const cleanPaymentMethod = (data.paymentMethod || 'PIX').trim().slice(0, 60) || 'PIX';
+  const cleanSubtotal = Math.max(0, Number.isFinite(Number(data.subtotal)) ? Number(data.subtotal) : 0);
+  const cleanDiscount = Math.max(0, Number.isFinite(Number(data.discount)) ? Number(data.discount) : 0);
+  const cleanShipping = Math.max(0, Number.isFinite(Number(data.shipping)) ? Number(data.shipping) : 0);
+  const cleanTotalValue = Math.max(0, Number.isFinite(Number(data.totalValue)) ? Number(data.totalValue) : 0);
+  const cleanTotalCost = Math.max(0, Number.isFinite(Number(data.totalCost)) ? Number(data.totalCost) : 0);
+
   try {
     if (existingId) {
       await updateDoc(doc(db, 'orders', id), {
-        customerId: data.customerId || '',
-        customerName: data.customerName || 'Cliente Avulso',
-        expectedDeliveryDate: data.expectedDeliveryDate || '',
-        items: data.items,
-        subtotal: Number(data.subtotal) || 0,
-        discount: Number(data.discount) || 0,
-        shipping: Number(data.shipping) || 0,
-        totalValue: Number(data.totalValue) || 0,
-        totalCost: Number(data.totalCost) || 0,
-        paymentMethod: data.paymentMethod || 'PIX',
-        notes: data.notes.trim(),
+        customerId: String(data.customerId || '').slice(0, 128),
+        customerName: cleanCustomerName,
+        expectedDeliveryDate: cleanDeliveryDate,
+        items: cleanItems,
+        subtotal: cleanSubtotal,
+        discount: cleanDiscount,
+        shipping: cleanShipping,
+        totalValue: cleanTotalValue,
+        totalCost: cleanTotalCost,
+        paymentMethod: cleanPaymentMethod,
+        notes: cleanNotes,
         updatedAt: serverTimestamp(),
       });
       return id;
@@ -1036,65 +1098,89 @@ export async function saveOrder(
     await runTransaction(db, async (tx) => {
       const settingsRef = doc(db, 'settings', tenant.companyId);
       const settingsSnap = await tx.get(settingsRef);
-      const nextNum = ((settingsSnap.data()?.orderCounter as number) || 0) + 1;
+      const nextNum = settingsSnap.exists()
+        ? ((settingsSnap.data()?.orderCounter as number) || 0) + 1
+        : 1;
       const orderNumber = `PED-${String(nextNum).padStart(4, '0')}`;
 
       const shouldGenerate =
         generateProductionOnApprove &&
         (data.status === 'aprovado' || data.status === 'aguardando_producao');
 
-      tx.update(settingsRef, {
-        orderCounter: nextNum,
-        updatedAt: serverTimestamp(),
-      });
+      if (settingsSnap.exists()) {
+        tx.update(settingsRef, {
+          orderCounter: nextNum,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        tx.set(settingsRef, {
+          companyId: tenant.companyId,
+          ownerUid: tenant.ownerUid,
+          energyTariffPerKwh: 0.92,
+          defaultProfitMargin: 45,
+          defaultPaymentFeePercent: 3.5,
+          defaultHourlyLaborRate: 25,
+          defaultPackagingCost: 4.5,
+          lowStockThresholdGrams: 250,
+          currency: 'BRL',
+          orderCounter: nextNum,
+          quoteCounter: 0,
+          purchaseCounter: 0,
+          materialTypes: DEFAULT_MATERIAL_TYPES,
+          expenseCategories: DEFAULT_EXPENSE_CATEGORIES,
+          materialDensities: DEFAULT_MATERIAL_DENSITIES,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
 
       tx.set(doc(db, 'orders', id), {
         companyId: tenant.companyId,
         ownerUid: tenant.ownerUid,
         orderNumber,
-        quoteId: data.quoteId || '',
-        customerId: data.customerId || '',
-        customerName: data.customerName || 'Cliente Avulso',
-        expectedDeliveryDate: data.expectedDeliveryDate || '',
-        items: data.items,
-        subtotal: Number(data.subtotal) || 0,
-        discount: Number(data.discount) || 0,
-        shipping: Number(data.shipping) || 0,
-        totalValue: Number(data.totalValue) || 0,
-        totalCost: Number(data.totalCost) || 0,
+        quoteId: String(data.quoteId || '').slice(0, 128),
+        customerId: String(data.customerId || '').slice(0, 128),
+        customerName: cleanCustomerName,
+        expectedDeliveryDate: cleanDeliveryDate,
+        items: cleanItems,
+        subtotal: cleanSubtotal,
+        discount: cleanDiscount,
+        shipping: cleanShipping,
+        totalValue: cleanTotalValue,
+        totalCost: cleanTotalCost,
         paidAmount: 0,
-        paymentMethod: data.paymentMethod || 'PIX',
+        paymentMethod: cleanPaymentMethod,
         paymentStatus: 'pendente',
         status: shouldGenerate ? 'aguardando_producao' : data.status,
         productionGenerated: shouldGenerate,
-        notes: data.notes.trim(),
+        notes: cleanNotes,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
 
       if (shouldGenerate) {
-        data.items.forEach((item) => {
+        cleanItems.forEach((item) => {
           const jobId = createEntityId('job');
           tx.set(doc(db, 'productionJobs', jobId), {
             companyId: tenant.companyId,
             ownerUid: tenant.ownerUid,
             orderId: id,
             orderNumber,
-            productId: item.productId || '',
+            productId: item.productId,
             productName: item.productName,
-            customerId: data.customerId || '',
-            customerName: data.customerName || 'Cliente Avulso',
-            printerId: item.printerId || '',
-            printerName: item.printerName || '',
-            materialId: item.materialId || '',
-            materialName: item.materialName || '',
-            color: item.color || '',
-            quantity: Math.max(1, item.quantity),
-            plannedWeightGrams: Number(item.weightGrams) || 0,
+            customerId: String(data.customerId || '').slice(0, 128),
+            customerName: cleanCustomerName,
+            printerId: item.printerId,
+            printerName: item.printerName,
+            materialId: item.materialId,
+            materialName: item.materialName,
+            color: item.color,
+            quantity: item.quantity,
+            plannedWeightGrams: item.weightGrams,
             actualWeightGrams: 0,
             wasteWeightGrams: 0,
             reservedWeightGrams: 0,
-            estimatedMinutes: Number(item.printTimeMinutes) || 0,
+            estimatedMinutes: item.printTimeMinutes,
             actualMinutes: 0,
             startedAt: '',
             estimatedFinishAt: '',
