@@ -12,6 +12,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useErp } from '../../context/ErpContext';
+import { formatFirestoreErrorMessage } from '../../lib/firebase';
 import {
   cancelOrderAndRelease,
   generateProductionForOrder,
@@ -33,6 +34,7 @@ import {
   ConfirmModal,
   EmptyState,
   LoadingButton,
+  LoadingState,
   Modal,
   StatusText,
   inputClass,
@@ -65,6 +67,7 @@ export const OrdersModule: React.FC = () => {
     quickActionTrigger,
     triggerQuickAction,
     setActiveSection,
+    isSectionLoading,
     showToast,
   } = useErp();
 
@@ -149,7 +152,10 @@ export const OrdersModule: React.FC = () => {
   };
 
   const handleDuplicate = async (o: Order) => {
-    if (!tenant) return;
+    if (!tenant) {
+      showToast('Sessão da empresa não inicializada. Recarregue a página.', 'error');
+      return;
+    }
     try {
       await saveOrder(
         tenant,
@@ -173,7 +179,7 @@ export const OrdersModule: React.FC = () => {
       );
       showToast(`Pedido ${o.orderNumber} duplicado com sucesso.`);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao duplicar pedido.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao duplicar pedido.'), 'error');
     }
   };
 
@@ -253,16 +259,7 @@ export const OrdersModule: React.FC = () => {
   }, [orders, search, statusFilter]);
 
   const extractReadableError = (err: unknown, fallback: string): string => {
-    if (!(err instanceof Error)) return fallback;
-    try {
-      const parsed = JSON.parse(err.message) as { error?: string; path?: string };
-      if (parsed && parsed.error) {
-        return `Erro ao salvar no banco (${parsed.path || 'orders'}): ${parsed.error}`;
-      }
-    } catch {
-      // plain error string
-    }
-    return err.message || fallback;
+    return formatFirestoreErrorMessage(err, fallback);
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -315,40 +312,49 @@ export const OrdersModule: React.FC = () => {
   };
 
   const handleGenerateProduction = async (o: Order) => {
-    if (!tenant) return;
+    if (!tenant) {
+      showToast('Sessão da empresa não inicializada. Recarregue a página.', 'error');
+      return;
+    }
     try {
       const count = await generateProductionForOrder(tenant, o);
       showToast(`${count} tarefa(s) de produção gerada(s) para ${o.orderNumber}.`);
       setActiveSection('production');
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao gerar produção.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao gerar produção.'), 'error');
     }
   };
 
   const handlePayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant || !payOrder) return;
+    if (!tenant || !payOrder) {
+      showToast('Sessão da empresa não inicializada.', 'error');
+      return;
+    }
     setPaying(true);
     try {
       await recordOrderPayment(tenant, payOrder.id, payAmount, payMethod, payDate);
       showToast('Pagamento registrado no pedido e no fluxo financeiro.');
       setPayOrder(null);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao registrar pagamento.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao registrar pagamento.'), 'error');
     } finally {
       setPaying(false);
     }
   };
 
   const handleCancelOrder = async () => {
-    if (!tenant || !cancelTarget) return;
+    if (!tenant || !cancelTarget) {
+      showToast('Sessão da empresa não inicializada.', 'error');
+      return;
+    }
     setCanceling(true);
     try {
       await cancelOrderAndRelease(tenant, cancelTarget, productionJobs);
       showToast(`Pedido ${cancelTarget.orderNumber} cancelado e reservas liberadas.`, 'info');
       setCancelTarget(null);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao cancelar pedido.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao cancelar pedido.'), 'error');
     } finally {
       setCanceling(false);
     }
@@ -395,13 +401,17 @@ export const OrdersModule: React.FC = () => {
       </div>
 
       {filteredOrders.length === 0 ? (
-        <EmptyState
-          icon={<ClipboardList className="w-6 h-6" />}
-          title="Nenhum pedido registrado"
-          description="Crie pedidos com produtos do catálogo ou peças personalizadas, gere tarefas de produção e acompanhe pagamentos."
-          actionLabel="Criar primeiro pedido"
-          onAction={openCreate}
-        />
+        isSectionLoading && orders.length === 0 ? (
+          <LoadingState label="Carregando pedidos do Firestore..." />
+        ) : (
+          <EmptyState
+            icon={<ClipboardList className="w-6 h-6" />}
+            title="Nenhum pedido registrado"
+            description="Crie pedidos com produtos do catálogo ou peças personalizadas, gere tarefas de produção e acompanhe pagamentos."
+            actionLabel="Criar primeiro pedido"
+            onAction={openCreate}
+          />
+        )
       ) : (
         <div className="bg-[#1D2027] border border-[#282C35] rounded-xl overflow-hidden">
           <div className="overflow-x-auto">

@@ -26,6 +26,7 @@ import {
   ConfirmModal,
   EmptyState,
   LoadingButton,
+  LoadingState,
   Modal,
   StatusText,
   inputClass,
@@ -44,6 +45,7 @@ export const QuotesModule: React.FC = () => {
     quickActionTrigger,
     triggerQuickAction,
     setActiveSection,
+    isSectionLoading,
     showToast,
   } = useErp();
 
@@ -371,13 +373,17 @@ export const QuotesModule: React.FC = () => {
       </div>
 
       {filteredQuotes.length === 0 ? (
-        <EmptyState
-          icon={<FileText className="w-6 h-6" />}
-          title="Nenhum orçamento encontrado"
-          description="Crie orçamentos profissionais para seus clientes com vários itens, validade e conversão direta em pedido e produção."
-          actionLabel="Criar primeiro orçamento"
-          onAction={openCreate}
-        />
+        isSectionLoading && quotes.length === 0 ? (
+          <LoadingState label="Carregando orçamentos do Firestore..." />
+        ) : (
+          <EmptyState
+            icon={<FileText className="w-6 h-6" />}
+            title="Nenhum orçamento encontrado"
+            description="Crie orçamentos profissionais para seus clientes com vários itens, validade e conversão direta em pedido e produção."
+            actionLabel="Criar primeiro orçamento"
+            onAction={openCreate}
+          />
+        )
       ) : (
         <div className="bg-[#1D2027] border border-[#282C35] rounded-xl overflow-hidden">
           <div className="overflow-x-auto">

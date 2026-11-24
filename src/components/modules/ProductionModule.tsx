@@ -11,6 +11,7 @@ import {
   Search,
 } from 'lucide-react';
 import { useErp } from '../../context/ErpContext';
+import { formatFirestoreErrorMessage } from '../../lib/firebase';
 import {
   createStandaloneProductionJob,
   failProductionJobAndOptionalReprint,
@@ -25,11 +26,13 @@ import {
   formatDateTimeBR,
   formatGrams,
   formatMinutesToHours,
+  toDateObject,
 } from '../../utils/formatters';
 import {
   DurationInput,
   EmptyState,
   LoadingButton,
+  LoadingState,
   Modal,
   StatusText,
   inputClass,
@@ -58,6 +61,7 @@ export const ProductionModule: React.FC = () => {
     orders,
     quickActionTrigger,
     triggerQuickAction,
+    isSectionLoading,
     showToast,
   } = useErp();
 
@@ -129,19 +133,28 @@ export const ProductionModule: React.FC = () => {
 
   const filteredJobs = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return productionJobs;
-    return productionJobs.filter(
-      (j) =>
-        j.productName.toLowerCase().includes(term) ||
-        j.orderNumber.toLowerCase().includes(term) ||
-        j.customerName.toLowerCase().includes(term) ||
-        j.printerName.toLowerCase().includes(term)
-    );
+    return [...productionJobs]
+      .filter(
+        (j) =>
+          !term ||
+          j.productName.toLowerCase().includes(term) ||
+          j.orderNumber.toLowerCase().includes(term) ||
+          j.customerName.toLowerCase().includes(term) ||
+          j.printerName.toLowerCase().includes(term)
+      )
+      .sort((a, b) => {
+        const ta = toDateObject(a.createdAt)?.getTime() || 0;
+        const tb = toDateObject(b.createdAt)?.getTime() || 0;
+        return tb - ta;
+      });
   }, [productionJobs, search]);
 
   const handleCreateJob = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant) return;
+    if (!tenant) {
+      showToast('Sessão da empresa não inicializada. Recarregue a página.', 'error');
+      return;
+    }
     if (!newForm.productName.trim()) {
       showToast('Informe o nome da peça para produção.', 'error');
       return;
@@ -171,7 +184,7 @@ export const ProductionModule: React.FC = () => {
       showToast('Tarefa de produção adicionada.');
       setNewModalOpen(false);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao criar tarefa.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao criar tarefa.'), 'error');
     } finally {
       setCreating(false);
     }
@@ -196,7 +209,10 @@ export const ProductionModule: React.FC = () => {
 
   const handleStartPrint = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant || !startJob) return;
+    if (!tenant || !startJob) {
+      showToast('Sessão da empresa não inicializada.', 'error');
+      return;
+    }
     if (!startForm.printerId) {
       showToast('Selecione uma impressora disponível.', 'error');
       return;
@@ -217,7 +233,7 @@ export const ProductionModule: React.FC = () => {
       showToast(`Impressão iniciada em ${prt?.name || 'impressora'}.`);
       setStartJob(null);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao iniciar impressão.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao iniciar impressão.'), 'error');
     } finally {
       setStarting(false);
     }
@@ -235,14 +251,17 @@ export const ProductionModule: React.FC = () => {
 
   const handleFinishPrint = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant || !finishJob || !settings) return;
+    if (!tenant || !finishJob || !settings) {
+      showToast('Sessão da empresa não inicializada.', 'error');
+      return;
+    }
     setFinishing(true);
     try {
       await finishProductionJob(tenant, finishJob, settings, finishForm);
       showToast('Impressão finalizada! Estoque atualizado e custo registrado.');
       setFinishJob(null);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao finalizar impressão.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao finalizar impressão.'), 'error');
     } finally {
       setFinishing(false);
     }
@@ -260,7 +279,10 @@ export const ProductionModule: React.FC = () => {
 
   const handleFailPrint = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant || !failJob || !settings) return;
+    if (!tenant || !failJob || !settings) {
+      showToast('Sessão da empresa não inicializada.', 'error');
+      return;
+    }
     if (!failForm.failureReason.trim()) {
       showToast('Informe o motivo da falha na impressão.', 'error');
       return;
@@ -281,7 +303,7 @@ export const ProductionModule: React.FC = () => {
       );
       setFailJob(null);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao registrar falha.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao registrar falha.'), 'error');
     } finally {
       setFailing(false);
     }
@@ -317,7 +339,7 @@ export const ProductionModule: React.FC = () => {
       await moveProductionJobStage(job.id, targetStage);
       showToast(`Tarefa movida para "${STAGES.find((s) => s.id === targetStage)?.label}".`);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao mover tarefa.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao mover tarefa.'), 'error');
     }
   };
 
@@ -393,13 +415,17 @@ export const ProductionModule: React.FC = () => {
       </div>
 
       {filteredJobs.length === 0 ? (
-        <EmptyState
-          icon={<Layers className="w-6 h-6" />}
-          title="Nenhuma tarefa na produção"
-          description="Aprove um pedido para gerar tarefas automaticamente ou crie uma impressão avulsa para iniciar o acompanhamento no Kanban."
-          actionLabel="Nova tarefa de produção"
-          onAction={() => setNewModalOpen(true)}
-        />
+        isSectionLoading && productionJobs.length === 0 ? (
+          <LoadingState label="Carregando fila de produção do banco de dados..." />
+        ) : (
+          <EmptyState
+            icon={<Layers className="w-6 h-6" />}
+            title="Nenhuma tarefa na produção"
+            description="Aprove um pedido para gerar tarefas automaticamente ou crie uma impressão avulsa para iniciar o acompanhamento no Kanban."
+            actionLabel="Nova tarefa de produção"
+            onAction={() => setNewModalOpen(true)}
+          />
+        )
       ) : viewMode === 'kanban' ? (
         /* Horizontal Kanban Board */
         <div className="flex gap-4 overflow-x-auto pb-4 items-start">
@@ -856,7 +882,7 @@ export const ProductionModule: React.FC = () => {
               <label className={labelClass}>Peso real consumido (g) *</label>
               <input
                 type="number"
-                step="0.1"
+                step="any"
                 min="0"
                 required
                 value={finishForm.actualWeightGrams}
@@ -870,7 +896,7 @@ export const ProductionModule: React.FC = () => {
               <label className={labelClass}>Desperdício / suportes (g)</label>
               <input
                 type="number"
-                step="0.1"
+                step="any"
                 min="0"
                 value={finishForm.wasteWeightGrams}
                 onChange={(e) =>
@@ -933,7 +959,7 @@ export const ProductionModule: React.FC = () => {
               <label className={labelClass}>Filamento perdido (g)</label>
               <input
                 type="number"
-                step="0.1"
+                step="any"
                 min="0"
                 value={failForm.wasteWeightGrams}
                 onChange={(e) =>

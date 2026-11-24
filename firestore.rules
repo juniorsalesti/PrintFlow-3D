@@ -824,7 +824,7 @@ service cloud.firestore {
             incoming().diff(existing()).affectedKeys().hasOnly([
               'customerId', 'customerName', 'expectedDeliveryDate', 'items',
               'subtotal', 'discount', 'shipping', 'totalValue', 'totalCost',
-              'paymentMethod', 'notes', 'updatedAt'
+              'paymentMethod', 'status', 'notes', 'updatedAt'
             ]) ||
             incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) ||
             incoming().diff(existing()).affectedKeys().hasOnly(['status', 'productionGenerated', 'updatedAt']) ||

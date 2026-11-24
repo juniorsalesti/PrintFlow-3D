@@ -17,6 +17,7 @@ import {
   YAxis,
 } from 'recharts';
 import { useErp } from '../../context/ErpContext';
+import { formatFirestoreErrorMessage } from '../../lib/firebase';
 import {
   deleteExpense,
   deleteTransaction,
@@ -37,6 +38,7 @@ import {
   EmptyState,
   KpiCard,
   LoadingButton,
+  LoadingState,
   Modal,
   StatusText,
   inputClass,
@@ -53,6 +55,7 @@ export const FinancialModule: React.FC = () => {
     productionJobs,
     quickActionTrigger,
     triggerQuickAction,
+    isSectionLoading,
     showToast,
   } = useErp();
 
@@ -243,7 +246,10 @@ export const FinancialModule: React.FC = () => {
 
   const handleSaveExpense = async (ev: React.FormEvent) => {
     ev.preventDefault();
-    if (!tenant) return;
+    if (!tenant) {
+      showToast('Sessão da empresa não inicializada. Recarregue a página.', 'error');
+      return;
+    }
     if (!expForm.description.trim() || expForm.amount <= 0) {
       showToast('Informe descrição e valor maior que zero.', 'error');
       return;
@@ -263,14 +269,17 @@ export const FinancialModule: React.FC = () => {
       showToast(editingExp ? 'Despesa atualizada.' : 'Despesa lançada no financeiro.');
       setExpModalOpen(false);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao salvar despesa.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao salvar despesa.'), 'error');
     } finally {
       setSavingExp(false);
     }
   };
 
   const handleMarkExpensePaid = async (e: Expense) => {
-    if (!tenant) return;
+    if (!tenant) {
+      showToast('Sessão da empresa não inicializada.', 'error');
+      return;
+    }
     try {
       await saveExpense(
         tenant,
@@ -291,13 +300,16 @@ export const FinancialModule: React.FC = () => {
       );
       showToast('Conta marcada como paga.');
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao quitar conta.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao quitar conta.'), 'error');
     }
   };
 
   const handleSaveRevenue = async (ev: React.FormEvent) => {
     ev.preventDefault();
-    if (!tenant) return;
+    if (!tenant) {
+      showToast('Sessão da empresa não inicializada. Recarregue a página.', 'error');
+      return;
+    }
     if (!revForm.description.trim() || revForm.amount <= 0) {
       showToast('Informe descrição e valor.', 'error');
       return;
@@ -322,7 +334,7 @@ export const FinancialModule: React.FC = () => {
       showToast('Receita registrada.');
       setRevModalOpen(false);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao registrar receita.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao registrar receita.'), 'error');
     } finally {
       setSavingRev(false);
     }
@@ -337,7 +349,7 @@ export const FinancialModule: React.FC = () => {
       showToast('Registro removido.');
       setDeleteTarget(null);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao remover.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao remover.'), 'error');
     } finally {
       setDeleting(false);
     }
@@ -493,13 +505,17 @@ export const FinancialModule: React.FC = () => {
       {tab === 'fluxo' && (
         <div className="bg-[#1D2027] border border-[#282C35] rounded-xl overflow-hidden">
           {sortedTransactions.length === 0 ? (
-            <EmptyState
-              icon={<DollarSign className="w-6 h-6" />}
-              title="Nenhuma movimentação financeira"
-              description="Recebimentos de pedidos, custos de produção e despesas lançadas aparecerão aqui automaticamente."
-              actionLabel="Lançar despesa"
-              onAction={openNewExpense}
-            />
+            isSectionLoading && transactions.length === 0 ? (
+              <LoadingState label="Carregando fluxo financeiro do banco de dados..." />
+            ) : (
+              <EmptyState
+                icon={<DollarSign className="w-6 h-6" />}
+                title="Nenhuma movimentação financeira"
+                description="Recebimentos de pedidos, custos de produção e despesas lançadas aparecerão aqui automaticamente."
+                actionLabel="Lançar despesa"
+                onAction={openNewExpense}
+              />
+            )
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
@@ -575,13 +591,17 @@ export const FinancialModule: React.FC = () => {
       {tab === 'pagar' && (
         <div className="bg-[#1D2027] border border-[#282C35] rounded-xl overflow-hidden">
           {expenses.length === 0 ? (
-            <EmptyState
-              icon={<DollarSign className="w-6 h-6" />}
-              title="Nenhuma despesa cadastrada"
-              description="Lance despesas fixas e variáveis como energia, aluguel, manutenção e embalagens."
-              actionLabel="Cadastrar despesa"
-              onAction={openNewExpense}
-            />
+            isSectionLoading ? (
+              <LoadingState label="Carregando despesas do banco de dados..." />
+            ) : (
+              <EmptyState
+                icon={<DollarSign className="w-6 h-6" />}
+                title="Nenhuma despesa cadastrada"
+                description="Lance despesas fixas e variáveis como energia, aluguel, manutenção e embalagens."
+                actionLabel="Cadastrar despesa"
+                onAction={openNewExpense}
+              />
+            )
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
@@ -666,11 +686,15 @@ export const FinancialModule: React.FC = () => {
       {tab === 'receber' && (
         <div className="bg-[#1D2027] border border-[#282C35] rounded-xl overflow-hidden">
           {openReceivables.length === 0 ? (
-            <EmptyState
-              icon={<CheckCircle2 className="w-6 h-6" />}
-              title="Nenhum valor pendente a receber"
-              description="Todos os pedidos ativos já estão quitados."
-            />
+            isSectionLoading && orders.length === 0 ? (
+              <LoadingState label="Carregando contas a receber do banco de dados..." />
+            ) : (
+              <EmptyState
+                icon={<CheckCircle2 className="w-6 h-6" />}
+                title="Nenhum valor pendente a receber"
+                description="Todos os pedidos ativos já estão quitados."
+              />
+            )
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
@@ -706,15 +730,25 @@ export const FinancialModule: React.FC = () => {
                           <button
                             type="button"
                             onClick={async () => {
-                              if (!tenant) return;
-                              await recordOrderPayment(
-                                tenant,
-                                o.id,
-                                remaining,
-                                o.paymentMethod || 'PIX',
-                                getTodayISO()
-                              );
-                              showToast(`Saldo de ${o.orderNumber} quitado!`);
+                              if (!tenant) {
+                                showToast('Sessão da empresa não inicializada.', 'error');
+                                return;
+                              }
+                              try {
+                                await recordOrderPayment(
+                                  tenant,
+                                  o.id,
+                                  remaining,
+                                  o.paymentMethod || 'PIX',
+                                  getTodayISO()
+                                );
+                                showToast(`Saldo de ${o.orderNumber} quitado!`);
+                              } catch (err) {
+                                showToast(
+                                  formatFirestoreErrorMessage(err, 'Erro ao quitar saldo.'),
+                                  'error'
+                                );
+                              }
                             }}
                             className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-medium cursor-pointer"
                           >

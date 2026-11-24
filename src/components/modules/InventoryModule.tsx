@@ -19,6 +19,7 @@ import {
   YAxis,
 } from 'recharts';
 import { useErp } from '../../context/ErpContext';
+import { formatFirestoreErrorMessage } from '../../lib/firebase';
 import {
   deleteMaterial,
   recordInventoryAdjustment,
@@ -40,6 +41,7 @@ import {
   EmptyState,
   KpiCard,
   LoadingButton,
+  LoadingState,
   Modal,
   StatusText,
   inputClass,
@@ -74,6 +76,7 @@ export const InventoryModule: React.FC = () => {
     settings,
     quickActionTrigger,
     triggerQuickAction,
+    isSectionLoading,
     showToast,
   } = useErp();
 
@@ -137,16 +140,22 @@ export const InventoryModule: React.FC = () => {
 
   const filteredMaterials = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return materials.filter((m) => {
-      if (filterMaterial !== 'todos' && m.materialType !== filterMaterial) return false;
-      if (!term) return true;
-      return (
-        m.name.toLowerCase().includes(term) ||
-        m.brand.toLowerCase().includes(term) ||
-        m.color.toLowerCase().includes(term) ||
-        m.materialType.toLowerCase().includes(term)
-      );
-    });
+    return [...materials]
+      .filter((m) => {
+        if (filterMaterial !== 'todos' && m.materialType !== filterMaterial) return false;
+        if (!term) return true;
+        return (
+          m.name.toLowerCase().includes(term) ||
+          m.brand.toLowerCase().includes(term) ||
+          m.color.toLowerCase().includes(term) ||
+          m.materialType.toLowerCase().includes(term)
+        );
+      })
+      .sort((a, b) => {
+        const ta = toDateObject(a.createdAt)?.getTime() || 0;
+        const tb = toDateObject(b.createdAt)?.getTime() || 0;
+        return tb - ta;
+      });
   }, [materials, search, filterMaterial]);
 
   const sortedMovements = useMemo(() => {
@@ -224,7 +233,7 @@ export const InventoryModule: React.FC = () => {
       setNewMaterialTypeInput('');
       showToast(`Tipo de material "${label}" adicionado.`);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao adicionar material.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao adicionar material.'), 'error');
     } finally {
       setAddingMaterialType(false);
     }
@@ -232,7 +241,10 @@ export const InventoryModule: React.FC = () => {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant) return;
+    if (!tenant) {
+      showToast('Sessão da empresa não inicializada. Recarregue a página.', 'error');
+      return;
+    }
     if (!form.name.trim()) {
       showToast('Informe o nome do filamento.', 'error');
       return;
@@ -251,7 +263,7 @@ export const InventoryModule: React.FC = () => {
       showToast(editing ? 'Filamento atualizado.' : 'Filamento adicionado ao estoque.');
       setModalOpen(false);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao salvar filamento.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao salvar filamento.'), 'error');
     } finally {
       setSaving(false);
     }
@@ -259,7 +271,10 @@ export const InventoryModule: React.FC = () => {
 
   const handleSubmitMovement = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant || !moveModalMat) return;
+    if (!tenant || !moveModalMat) {
+      showToast('Sessão da empresa não inicializada.', 'error');
+      return;
+    }
     setMoving(true);
     try {
       await recordInventoryAdjustment(
@@ -275,7 +290,7 @@ export const InventoryModule: React.FC = () => {
       setMoveNotes('');
       setAllowNegativeAuth(false);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro na movimentação.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro na movimentação.'), 'error');
     } finally {
       setMoving(false);
     }
@@ -289,7 +304,7 @@ export const InventoryModule: React.FC = () => {
       showToast('Filamento removido.');
       setDeleteTarget(null);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao remover filamento.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao remover filamento.'), 'error');
     } finally {
       setDeleting(false);
     }
@@ -385,13 +400,17 @@ export const InventoryModule: React.FC = () => {
           </div>
 
           {filteredMaterials.length === 0 ? (
-            <EmptyState
-              icon={<Boxes className="w-6 h-6" />}
-              title="Nenhum filamento em estoque"
-              description="Cadastre seus rolos de PLA, PETG, ABS ou TPU para controlar reservas, consumo real e alertas de reposição."
-              actionLabel="Cadastrar primeiro filamento"
-              onAction={openCreate}
-            />
+            isSectionLoading && materials.length === 0 ? (
+              <LoadingState label="Carregando filamentos do Firestore..." />
+            ) : (
+              <EmptyState
+                icon={<Boxes className="w-6 h-6" />}
+                title="Nenhum filamento em estoque"
+                description="Cadastre seus rolos de PLA, PETG, ABS ou TPU para controlar reservas, consumo real e alertas de reposição."
+                actionLabel="Cadastrar primeiro filamento"
+                onAction={openCreate}
+              />
+            )
           ) : (
             <div className="bg-[#1D2027] border border-[#282C35] rounded-xl overflow-hidden">
               <div className="overflow-x-auto">
@@ -750,6 +769,7 @@ export const InventoryModule: React.FC = () => {
               <label className={labelClass}>Peso inicial do rolo (g)</label>
               <input
                 type="number"
+                step="any"
                 min="1"
                 value={form.initialWeightGrams}
                 onChange={(e) => {
@@ -769,6 +789,7 @@ export const InventoryModule: React.FC = () => {
                 <label className={labelClass}>Peso atual disponível (g)</label>
                 <input
                   type="number"
+                  step="any"
                   min="0"
                   value={form.currentWeightGrams}
                   onChange={(e) =>
@@ -783,6 +804,7 @@ export const InventoryModule: React.FC = () => {
               <label className={labelClass}>Peso da embalagem/carretel vazio (g)</label>
               <input
                 type="number"
+                step="any"
                 min="0"
                 value={form.emptySpoolWeightGrams}
                 onChange={(e) =>
@@ -834,6 +856,7 @@ export const InventoryModule: React.FC = () => {
               <label className={labelClass}>Estoque mínimo de alerta (g)</label>
               <input
                 type="number"
+                step="any"
                 min="0"
                 value={form.minStockGrams}
                 onChange={(e) => setForm({ ...form, minStockGrams: Number(e.target.value) })}
@@ -903,7 +926,7 @@ export const InventoryModule: React.FC = () => {
               </label>
               <input
                 type="number"
-                step="0.1"
+                step="any"
                 min="0"
                 required
                 value={moveGrams}

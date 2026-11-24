@@ -1,4 +1,12 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebase/auth';
 import {
   auth,
@@ -10,11 +18,38 @@ import {
 } from '../lib/firebase';
 import {
   ensureCompanyBootstrap,
-  subscribeCompanyCollection,
+  fetchCompanyMembers,
   subscribeCompanyMembers,
   subscribeSingleDoc,
-  type TenantContext,
-} from '../services/erpService';
+} from '../services/companyService';
+import { fetchCustomers, subscribeCustomers } from '../services/customerService';
+import {
+  fetchExpenses,
+  fetchPurchases,
+  fetchSuppliers,
+  fetchTransactions,
+  subscribeExpenses,
+  subscribePurchases,
+  subscribeSuppliers,
+  subscribeTransactions,
+} from '../services/financeService';
+import { subscribeCompanyCollection, type TenantContext } from '../services/firestoreBase';
+import {
+  fetchInventoryMovements,
+  fetchMaterials,
+  subscribeInventoryMovements,
+  subscribeMaterials,
+} from '../services/inventoryService';
+import { fetchOrders, subscribeOrders } from '../services/orderService';
+import {
+  fetchMaintenanceRecords,
+  fetchPrinters,
+  subscribeMaintenanceRecords,
+  subscribePrinters,
+} from '../services/printerService';
+import { fetchProducts, subscribeProducts } from '../services/productService';
+import { fetchProductionJobs, subscribeProductionJobs } from '../services/productionService';
+import { fetchQuotes, subscribeQuotes } from '../services/quoteService';
 import type {
   AppNotification,
   Company,
@@ -37,6 +72,59 @@ import type {
   UserProfile,
 } from '../types/erp';
 import { diffDaysFromToday, formatDateBR, formatGrams } from '../utils/formatters';
+
+export type ErpCollectionKey =
+  | 'customers'
+  | 'products'
+  | 'materials'
+  | 'inventoryMovements'
+  | 'printers'
+  | 'maintenanceRecords'
+  | 'quotes'
+  | 'orders'
+  | 'productionJobs'
+  | 'transactions'
+  | 'expenses'
+  | 'suppliers'
+  | 'purchases'
+  | 'notifications'
+  | 'members';
+
+const SECTION_COLLECTIONS: Record<NavSectionId, ErpCollectionKey[]> = {
+  dashboard: [
+    'orders',
+    'quotes',
+    'productionJobs',
+    'transactions',
+    'expenses',
+    'materials',
+    'printers',
+    'maintenanceRecords',
+  ],
+  customers: ['customers', 'orders', 'quotes'],
+  products: ['products', 'printers', 'orders', 'productionJobs', 'materials'],
+  calculator: ['printers', 'materials', 'products', 'customers'],
+  quotes: ['quotes', 'customers', 'products', 'printers', 'materials'],
+  orders: ['orders', 'customers', 'products', 'printers', 'materials', 'productionJobs', 'transactions'],
+  production: ['productionJobs', 'orders', 'printers', 'materials', 'products'],
+  printers: ['printers', 'maintenanceRecords', 'productionJobs'],
+  inventory: ['materials', 'inventoryMovements', 'suppliers'],
+  financial: ['transactions', 'expenses', 'orders', 'suppliers', 'purchases'],
+  purchases: ['purchases', 'suppliers', 'materials'],
+  suppliers: ['suppliers', 'purchases', 'materials'],
+  reports: [
+    'orders',
+    'quotes',
+    'productionJobs',
+    'transactions',
+    'expenses',
+    'materials',
+    'printers',
+    'products',
+    'customers',
+  ],
+  settings: ['members'],
+};
 
 export interface SmartAlert {
   id: string;
@@ -80,6 +168,11 @@ interface ErpContextValue {
   setSelectedCustomerId: (id: string | null) => void;
   quickActionTrigger: string | null;
   triggerQuickAction: (action: string | null) => void;
+  // Data lifecycle states
+  isSectionLoading: boolean;
+  sectionError: string | null;
+  refreshCurrentSection: () => Promise<void>;
+  isCollectionLoading: (key: ErpCollectionKey) => boolean;
   // Collections
   customers: Customer[];
   products: Product[];
@@ -141,6 +234,11 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [members, setMembers] = useState<CompanyMember[]>([]);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
+  const [loadingMap, setLoadingMap] = useState<Partial<Record<ErpCollectionKey, boolean>>>({});
+  const [errorMap, setErrorMap] = useState<Partial<Record<ErpCollectionKey, string>>>({});
+  const [sectionFetching, setSectionFetching] = useState(false);
+  const refreshSeqRef = useRef(0);
+
   const showToast = useCallback((text: string, type: 'success' | 'error' | 'info' = 'success') => {
     const id = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     setToasts((prev) => [...prev, { id, type, text }]);
@@ -186,7 +284,8 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       let friendlyMsg = rawMsg;
       if (rawMsg.includes('auth/unauthorized-domain')) {
         const status = await recheckAuthorizedDomain();
-        const currentHost = status.currentHost || (typeof window !== 'undefined' ? window.location.hostname : '');
+        const currentHost =
+          status.currentHost || (typeof window !== 'undefined' ? window.location.hostname : '');
         if (status.checked && status.authorized && typeof window !== 'undefined') {
           const alreadyReloaded = window.sessionStorage.getItem('pf3d_auth_reload_once') === '1';
           if (!alreadyReloaded) {
@@ -199,7 +298,8 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           friendlyMsg = `Domínio "${currentHost}" não está autorizado no Firebase Auth. Copie este domínio e adicione-o em Firebase Console > Authentication > Configurações > Domínios autorizados.`;
         }
       } else if (rawMsg.includes('auth/popup-blocked')) {
-        friendlyMsg = 'O pop-up de login foi bloqueado pelo navegador. Libere os pop-ups para este site e tente novamente.';
+        friendlyMsg =
+          'O pop-up de login foi bloqueado pelo navegador. Libere os pop-ups para este site e tente novamente.';
       } else if (rawMsg.includes('auth/popup-closed-by-user')) {
         friendlyMsg = 'A janela de login do Google foi fechada antes da conclusão.';
       }
@@ -213,6 +313,8 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setProfile(null);
     setCompany(null);
     setSettings(null);
+    setLoadingMap({});
+    setErrorMap({});
   }, []);
 
   const runBootstrap = useCallback(async (currentUser: User) => {
@@ -256,10 +358,29 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => unsub();
   }, [runBootstrap]);
 
+  // Stabilize tenant solely on primitive identity keys so snapshot updates to
+  // company metadata never tear down or reset active Firestore listeners.
+  const companyId = company?.id;
+  const ownerUid = company?.ownerUid;
   const tenant = useMemo<TenantContext | null>(() => {
-    if (!profile || !company) return null;
-    return { companyId: company.id, ownerUid: company.ownerUid };
-  }, [profile, company]);
+    if (!companyId || !ownerUid) return null;
+    return { companyId, ownerUid };
+  }, [companyId, ownerUid]);
+
+  const markCollectionLoaded = useCallback((key: ErpCollectionKey) => {
+    setLoadingMap((prev) => (prev[key] === false ? prev : { ...prev, [key]: false }));
+    setErrorMap((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }, []);
+
+  const markCollectionError = useCallback((key: ErpCollectionKey, message: string) => {
+    setLoadingMap((prev) => ({ ...prev, [key]: false }));
+    setErrorMap((prev) => ({ ...prev, [key]: message }));
+  }, []);
 
   useEffect(() => {
     if (!tenant) {
@@ -278,8 +399,29 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setPurchases([]);
       setNotifications([]);
       setMembers([]);
+      setLoadingMap({});
+      setErrorMap({});
       return;
     }
+
+    setLoadingMap({
+      customers: true,
+      products: true,
+      materials: true,
+      inventoryMovements: true,
+      printers: true,
+      maintenanceRecords: true,
+      quotes: true,
+      orders: true,
+      productionJobs: true,
+      transactions: true,
+      expenses: true,
+      suppliers: true,
+      purchases: true,
+      notifications: true,
+      members: true,
+    });
+    setErrorMap({});
 
     const unsubs = [
       subscribeSingleDoc<Company>('companies', tenant.companyId, (docData) => {
@@ -288,34 +430,248 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       subscribeSingleDoc<CompanySettings>('settings', tenant.companyId, (docData) => {
         if (docData) setSettings(docData);
       }),
-      subscribeCompanyMembers(tenant, setMembers),
-      subscribeCompanyCollection<Customer>('customers', tenant, setCustomers),
-      subscribeCompanyCollection<Product>('products', tenant, setProducts),
-      subscribeCompanyCollection<Material>('materials', tenant, setMaterials),
-      subscribeCompanyCollection<InventoryMovement>('inventoryMovements', tenant, setInventoryMovements),
-      subscribeCompanyCollection<Printer>('printers', tenant, setPrinters),
-      subscribeCompanyCollection<MaintenanceRecord>('maintenanceRecords', tenant, setMaintenanceRecords),
-      subscribeCompanyCollection<Quote>('quotes', tenant, setQuotes),
-      subscribeCompanyCollection<Order>('orders', tenant, setOrders),
-      subscribeCompanyCollection<ProductionJob>('productionJobs', tenant, setProductionJobs),
-      subscribeCompanyCollection<Transaction>('transactions', tenant, setTransactions),
-      subscribeCompanyCollection<Expense>('expenses', tenant, setExpenses),
-      subscribeCompanyCollection<Supplier>('suppliers', tenant, setSuppliers),
-      subscribeCompanyCollection<Purchase>('purchases', tenant, setPurchases),
-      subscribeCompanyCollection<AppNotification>('notifications', tenant, setNotifications),
+      subscribeCompanyMembers(
+        tenant,
+        (items) => {
+          setMembers(items);
+          markCollectionLoaded('members');
+        },
+        (msg) => markCollectionError('members', msg)
+      ),
+      subscribeCustomers(
+        tenant,
+        (items) => {
+          setCustomers(items);
+          markCollectionLoaded('customers');
+        },
+        (msg) => markCollectionError('customers', msg)
+      ),
+      subscribeProducts(
+        tenant,
+        (items) => {
+          setProducts(items);
+          markCollectionLoaded('products');
+        },
+        (msg) => markCollectionError('products', msg)
+      ),
+      subscribeMaterials(
+        tenant,
+        (items) => {
+          setMaterials(items);
+          markCollectionLoaded('materials');
+        },
+        (msg) => markCollectionError('materials', msg)
+      ),
+      subscribeInventoryMovements(
+        tenant,
+        (items) => {
+          setInventoryMovements(items);
+          markCollectionLoaded('inventoryMovements');
+        },
+        (msg) => markCollectionError('inventoryMovements', msg)
+      ),
+      subscribePrinters(
+        tenant,
+        (items) => {
+          setPrinters(items);
+          markCollectionLoaded('printers');
+        },
+        (msg) => markCollectionError('printers', msg)
+      ),
+      subscribeMaintenanceRecords(
+        tenant,
+        (items) => {
+          setMaintenanceRecords(items);
+          markCollectionLoaded('maintenanceRecords');
+        },
+        (msg) => markCollectionError('maintenanceRecords', msg)
+      ),
+      subscribeQuotes(
+        tenant,
+        (items) => {
+          setQuotes(items);
+          markCollectionLoaded('quotes');
+        },
+        (msg) => markCollectionError('quotes', msg)
+      ),
+      subscribeOrders(
+        tenant,
+        (items) => {
+          setOrders(items);
+          markCollectionLoaded('orders');
+        },
+        (msg) => markCollectionError('orders', msg)
+      ),
+      subscribeProductionJobs(
+        tenant,
+        (items) => {
+          setProductionJobs(items);
+          markCollectionLoaded('productionJobs');
+        },
+        (msg) => markCollectionError('productionJobs', msg)
+      ),
+      subscribeTransactions(
+        tenant,
+        (items) => {
+          setTransactions(items);
+          markCollectionLoaded('transactions');
+        },
+        (msg) => markCollectionError('transactions', msg)
+      ),
+      subscribeExpenses(
+        tenant,
+        (items) => {
+          setExpenses(items);
+          markCollectionLoaded('expenses');
+        },
+        (msg) => markCollectionError('expenses', msg)
+      ),
+      subscribeSuppliers(
+        tenant,
+        (items) => {
+          setSuppliers(items);
+          markCollectionLoaded('suppliers');
+        },
+        (msg) => markCollectionError('suppliers', msg)
+      ),
+      subscribePurchases(
+        tenant,
+        (items) => {
+          setPurchases(items);
+          markCollectionLoaded('purchases');
+        },
+        (msg) => markCollectionError('purchases', msg)
+      ),
+      subscribeCompanyCollection<AppNotification>(
+        'notifications',
+        tenant,
+        (items) => {
+          setNotifications(items);
+          markCollectionLoaded('notifications');
+        },
+        (msg) => markCollectionError('notifications', msg)
+      ),
     ];
 
     return () => {
       unsubs.forEach((u) => u());
     };
-  }, [tenant]);
+  }, [tenant, markCollectionLoaded, markCollectionError]);
 
-  // Compute real-time smart operational alerts strictly from live database state
+  const fetchCollectionByKey = useCallback(
+    async (key: ErpCollectionKey, currentTenant: TenantContext) => {
+      switch (key) {
+        case 'customers':
+          setCustomers(await fetchCustomers(currentTenant));
+          break;
+        case 'products':
+          setProducts(await fetchProducts(currentTenant));
+          break;
+        case 'materials':
+          setMaterials(await fetchMaterials(currentTenant, true));
+          break;
+        case 'inventoryMovements':
+          setInventoryMovements(await fetchInventoryMovements(currentTenant, true));
+          break;
+        case 'printers':
+          setPrinters(await fetchPrinters(currentTenant, true));
+          break;
+        case 'maintenanceRecords':
+          setMaintenanceRecords(await fetchMaintenanceRecords(currentTenant, true));
+          break;
+        case 'quotes':
+          setQuotes(await fetchQuotes(currentTenant));
+          break;
+        case 'orders':
+          setOrders(await fetchOrders(currentTenant, true));
+          break;
+        case 'productionJobs':
+          setProductionJobs(await fetchProductionJobs(currentTenant, true));
+          break;
+        case 'transactions':
+          setTransactions(await fetchTransactions(currentTenant, true));
+          break;
+        case 'expenses':
+          setExpenses(await fetchExpenses(currentTenant, true));
+          break;
+        case 'suppliers':
+          setSuppliers(await fetchSuppliers(currentTenant, true));
+          break;
+        case 'purchases':
+          setPurchases(await fetchPurchases(currentTenant, true));
+          break;
+        case 'members':
+          setMembers(await fetchCompanyMembers(currentTenant));
+          break;
+        default:
+          break;
+      }
+    },
+    []
+  );
+
+  const refreshSectionData = useCallback(
+    async (section: NavSectionId) => {
+      if (!tenant) return;
+      const keys = SECTION_COLLECTIONS[section] || [];
+      if (keys.length === 0) return;
+
+      const seq = ++refreshSeqRef.current;
+      setSectionFetching(true);
+
+      await Promise.all(
+        keys.map(async (key) => {
+          try {
+            await fetchCollectionByKey(key, tenant);
+            markCollectionLoaded(key);
+          } catch (err) {
+            markCollectionError(
+              key,
+              formatFirestoreErrorMessage(err, `Erro ao carregar dados de ${key}.`)
+            );
+          }
+        })
+      );
+
+      if (refreshSeqRef.current === seq) {
+        setSectionFetching(false);
+      }
+    },
+    [tenant, fetchCollectionByKey, markCollectionLoaded, markCollectionError]
+  );
+
+  useEffect(() => {
+    if (!tenant) return;
+    void refreshSectionData(activeSection);
+  }, [tenant, activeSection, refreshSectionData]);
+
+  const refreshCurrentSection = useCallback(async () => {
+    await refreshSectionData(activeSection);
+  }, [refreshSectionData, activeSection]);
+
+  const isCollectionLoading = useCallback(
+    (key: ErpCollectionKey) => Boolean(loadingMap[key]),
+    [loadingMap]
+  );
+
+  const isSectionLoading = useMemo(() => {
+    if (!tenant) return false;
+    const keys = SECTION_COLLECTIONS[activeSection] || [];
+    return sectionFetching || keys.some((k) => Boolean(loadingMap[k]));
+  }, [tenant, activeSection, sectionFetching, loadingMap]);
+
+  const sectionError = useMemo(() => {
+    const keys = SECTION_COLLECTIONS[activeSection] || [];
+    for (const k of keys) {
+      if (errorMap[k]) return errorMap[k] || null;
+    }
+    return null;
+  }, [activeSection, errorMap]);
+
   const smartAlerts = useMemo<SmartAlert[]>(() => {
     const alerts: SmartAlert[] = [];
     const defaultThreshold = settings?.lowStockThresholdGrams ?? 250;
 
-    // 1. Filamentos com estoque baixo
     materials.forEach((mat) => {
       const available = mat.currentWeightGrams - mat.reservedWeightGrams;
       const threshold = mat.minStockGrams > 0 ? mat.minStockGrams : defaultThreshold;
@@ -332,7 +688,6 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
 
-    // 2. Pedidos atrasados e próximos do prazo
     orders.forEach((ord) => {
       if (ord.status === 'entregue' || ord.status === 'cancelado') return;
       const days = diffDaysFromToday(ord.expectedDeliveryDate);
@@ -360,7 +715,6 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
 
-    // 3. Manutenções pendentes
     maintenanceRecords
       .filter((m) => m.status === 'pendente')
       .forEach((m) => {
@@ -395,7 +749,6 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
 
-    // 4. Contas vencendo / atrasadas
     expenses
       .filter((e) => e.status === 'pendente' || e.status === 'atrasado')
       .forEach((exp) => {
@@ -413,7 +766,6 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       });
 
-    // 5. Impressões com falha recentes (sem reimpressão resolvida ou últimas falhas)
     productionJobs
       .filter((j) => j.status === 'falha_impressao')
       .slice(0, 5)
@@ -455,6 +807,10 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setSelectedCustomerId,
     quickActionTrigger,
     triggerQuickAction,
+    isSectionLoading,
+    sectionError,
+    refreshCurrentSection,
+    isCollectionLoading,
     customers,
     products,
     materials,

@@ -63,6 +63,9 @@ export const ErpLayout: React.FC<{ children: React.ReactNode }> = ({ children })
     products,
     quotes,
     smartAlerts,
+    isSectionLoading,
+    sectionError,
+    refreshCurrentSection,
   } = useErp();
 
   const [collapsed, setCollapsed] = useState(false);
@@ -269,10 +272,16 @@ export const ErpLayout: React.FC<{ children: React.ReactNode }> = ({ children })
             >
               <Menu className="w-5 h-5" />
             </button>
-            <div className="min-w-0">
+            <div className="min-w-0 flex items-center gap-2.5">
               <h1 className="font-display text-base sm:text-lg font-semibold text-[#F5F5F5] truncate">
                 {currentNavLabel}
               </h1>
+              {isSectionLoading && (
+                <span className="inline-flex items-center gap-1.5 text-xs text-[#9CA3AF]">
+                  <span className="w-3 h-3 rounded-full border-2 border-[#F97316] border-t-transparent animate-spin" />
+                  <span className="hidden md:inline">Sincronizando...</span>
+                </span>
+              )}
             </div>
           </div>
 
@@ -487,7 +496,30 @@ export const ErpLayout: React.FC<{ children: React.ReactNode }> = ({ children })
         </header>
 
         {/* Page Viewport */}
-        <main className="flex-1 p-4 lg:p-6 max-w-[1600px] w-full mx-auto">{children}</main>
+        <main className="flex-1 p-4 lg:p-6 max-w-[1600px] w-full mx-auto">
+          {sectionError && (
+            <div className="mb-4 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5 min-w-0">
+                <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-red-200">
+                    Falha ao consultar dados no servidor (Cloud Firestore)
+                  </p>
+                  <p className="text-xs text-red-300/90 mt-0.5 break-words">{sectionError}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => void refreshCurrentSection()}
+                disabled={isSectionLoading}
+                className="px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-xs font-medium text-red-100 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {isSectionLoading ? 'Recarregando...' : 'Tentar novamente'}
+              </button>
+            </div>
+          )}
+          {children}
+        </main>
       </div>
     </div>
   );

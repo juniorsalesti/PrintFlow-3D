@@ -123,6 +123,16 @@ export const EmptyState: React.FC<{
   </div>
 );
 
+export const LoadingState: React.FC<{ label?: string }> = ({
+  label = 'Carregando registros do Firestore...',
+}) => (
+  <div className="bg-[#1D2027] border border-[#282C35] rounded-xl p-10 text-center flex flex-col items-center justify-center max-w-xl mx-auto my-6">
+    <Loader2 className="w-7 h-7 text-[#F97316] animate-spin mb-3" />
+    <p className="text-sm font-medium text-[#F5F5F5]">{label}</p>
+    <p className="text-xs text-[#9CA3AF] mt-1">Sincronizando dados em tempo real com a nuvem.</p>
+  </div>
+);
+
 export const KpiCard: React.FC<{
   label: string;
   value: string;

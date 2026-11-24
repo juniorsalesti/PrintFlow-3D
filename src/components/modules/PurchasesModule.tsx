@@ -1,13 +1,15 @@
 import React, { useMemo, useState } from 'react';
 import { PackageCheck, Plus, Search, ShoppingCart, Trash2 } from 'lucide-react';
 import { useErp } from '../../context/ErpContext';
+import { formatFirestoreErrorMessage } from '../../lib/firebase';
 import { receivePurchaseAndUpdateStock, savePurchase } from '../../services/erpService';
 import type { Purchase, PurchaseItem } from '../../types/erp';
-import { createEntityId, formatBRL, formatDateBR, getTodayISO } from '../../utils/formatters';
+import { createEntityId, formatBRL, formatDateBR, getTodayISO, toDateObject } from '../../utils/formatters';
 import {
   ConfirmModal,
   EmptyState,
   LoadingButton,
+  LoadingState,
   Modal,
   StatusText,
   inputClass,
@@ -15,7 +17,7 @@ import {
 } from '../common/UiPrimitives';
 
 export const PurchasesModule: React.FC = () => {
-  const { tenant, purchases, suppliers, materials, showToast } = useErp();
+  const { tenant, purchases, suppliers, materials, isSectionLoading, showToast } = useErp();
 
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
@@ -71,18 +73,27 @@ export const PurchasesModule: React.FC = () => {
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return purchases;
-    return purchases.filter(
-      (p) =>
-        p.purchaseNumber.toLowerCase().includes(term) ||
-        p.supplierName.toLowerCase().includes(term) ||
-        p.items.some((i) => i.description.toLowerCase().includes(term))
-    );
+    const list = !term
+      ? [...purchases]
+      : purchases.filter(
+          (p) =>
+            p.purchaseNumber.toLowerCase().includes(term) ||
+            p.supplierName.toLowerCase().includes(term) ||
+            p.items.some((i) => i.description.toLowerCase().includes(term))
+        );
+    return list.sort((a, b) => {
+      const da = toDateObject(a.createdAt)?.getTime() || toDateObject(a.purchaseDate)?.getTime() || 0;
+      const db = toDateObject(b.createdAt)?.getTime() || toDateObject(b.purchaseDate)?.getTime() || 0;
+      return db - da;
+    });
   }, [purchases, search]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant) return;
+    if (!tenant) {
+      showToast('Sessão da empresa não inicializada. Recarregue a página.', 'error');
+      return;
+    }
     if (items.length === 0 || items.some((i) => !i.description.trim())) {
       showToast('Informe a descrição de todos os itens comprados.', 'error');
       return;
@@ -104,21 +115,25 @@ export const PurchasesModule: React.FC = () => {
       showToast('Ordem de compra registrada.');
       setModalOpen(false);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao registrar compra.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao registrar compra.'), 'error');
     } finally {
       setSaving(false);
     }
   };
 
   const handleReceive = async () => {
-    if (!tenant || !receiveTarget) return;
+    if (!tenant) {
+      showToast('Sessão da empresa não inicializada. Recarregue a página.', 'error');
+      return;
+    }
+    if (!receiveTarget) return;
     setReceiving(true);
     try {
       await receivePurchaseAndUpdateStock(tenant, receiveTarget);
       showToast('Compra recebida! Estoque e financeiro atualizados.');
       setReceiveTarget(null);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao confirmar recebimento.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao confirmar recebimento.'), 'error');
     } finally {
       setReceiving(false);
     }
@@ -148,13 +163,17 @@ export const PurchasesModule: React.FC = () => {
       </div>
 
       {filtered.length === 0 ? (
-        <EmptyState
-          icon={<ShoppingCart className="w-6 h-6" />}
-          title="Nenhuma compra registrada"
-          description="Registre pedidos de compra de filamentos e insumos. Ao confirmar o recebimento, o estoque é atualizado automaticamente."
-          actionLabel="Registrar primeira compra"
-          onAction={openCreate}
-        />
+        isSectionLoading && purchases.length === 0 ? (
+          <LoadingState label="Carregando compras do banco de dados..." />
+        ) : (
+          <EmptyState
+            icon={<ShoppingCart className="w-6 h-6" />}
+            title="Nenhuma compra registrada"
+            description="Registre pedidos de compra de filamentos e insumos. Ao confirmar o recebimento, o estoque é atualizado automaticamente."
+            actionLabel="Registrar primeira compra"
+            onAction={openCreate}
+          />
+        )
       ) : (
         <div className="bg-[#1D2027] border border-[#282C35] rounded-xl overflow-hidden">
           <div className="overflow-x-auto">
@@ -325,6 +344,7 @@ export const PurchasesModule: React.FC = () => {
                   <label className={labelClass}>Peso/rolo (g)</label>
                   <input
                     type="number"
+                    step="any"
                     min="0"
                     value={item.spoolWeightGrams}
                     onChange={(e) =>

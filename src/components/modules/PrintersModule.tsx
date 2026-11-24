@@ -9,6 +9,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { useErp } from '../../context/ErpContext';
+import { formatFirestoreErrorMessage } from '../../lib/firebase';
 import {
   completeMaintenanceRecord,
   deletePrinter,
@@ -22,12 +23,14 @@ import {
   formatMinutesToHours,
   formatNumber,
   getTodayISO,
+  toDateObject,
 } from '../../utils/formatters';
 import {
   ConfirmModal,
   EmptyState,
   KpiCard,
   LoadingButton,
+  LoadingState,
   Modal,
   StatusText,
   inputClass,
@@ -52,7 +55,8 @@ const emptyPrinterForm = {
 };
 
 export const PrintersModule: React.FC = () => {
-  const { tenant, printers, productionJobs, maintenanceRecords, showToast } = useErp();
+  const { tenant, printers, productionJobs, maintenanceRecords, isSectionLoading, showToast } =
+    useErp();
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Printer | null>(null);
@@ -101,6 +105,14 @@ export const PrintersModule: React.FC = () => {
     return { available, printing, totalHours, pendingMaint };
   }, [printers, maintenanceRecords]);
 
+  const sortedPrinters = useMemo(() => {
+    return [...printers].sort((a, b) => {
+      const ta = toDateObject(a.createdAt)?.getTime() || 0;
+      const tb = toDateObject(b.createdAt)?.getTime() || 0;
+      return tb - ta;
+    });
+  }, [printers]);
+
   const openCreate = () => {
     setEditing(null);
     setForm(emptyPrinterForm);
@@ -130,7 +142,10 @@ export const PrintersModule: React.FC = () => {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant) return;
+    if (!tenant) {
+      showToast('Sessão da empresa não inicializada. Recarregue a página.', 'error');
+      return;
+    }
     if (!form.name.trim()) {
       showToast('Informe o nome de identificação da impressora.', 'error');
       return;
@@ -141,7 +156,7 @@ export const PrintersModule: React.FC = () => {
       showToast(editing ? 'Impressora atualizada.' : 'Impressora adicionada ao parque.');
       setModalOpen(false);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao salvar impressora.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao salvar impressora.'), 'error');
     } finally {
       setSaving(false);
     }
@@ -149,7 +164,10 @@ export const PrintersModule: React.FC = () => {
 
   const handleSaveMaintenance = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant || !maintPrinter) return;
+    if (!tenant || !maintPrinter) {
+      showToast('Sessão da empresa não inicializada.', 'error');
+      return;
+    }
     if (!maintForm.description.trim()) {
       showToast('Descreva a manutenção ou falha.', 'error');
       return;
@@ -180,7 +198,7 @@ export const PrintersModule: React.FC = () => {
       showToast('Registro de manutenção salvo.');
       setMaintPrinter(null);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao registrar manutenção.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao registrar manutenção.'), 'error');
     } finally {
       setSavingMaint(false);
     }
@@ -194,7 +212,7 @@ export const PrintersModule: React.FC = () => {
       showToast('Impressora removida.');
       setDeleteTarget(null);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao remover impressora.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao remover impressora.'), 'error');
     } finally {
       setDeleting(false);
     }
@@ -254,17 +272,21 @@ export const PrintersModule: React.FC = () => {
         </button>
       </div>
 
-      {printers.length === 0 ? (
-        <EmptyState
-          icon={<PrinterIcon className="w-6 h-6" />}
-          title="Nenhuma impressora cadastrada"
-          description="Adicione suas impressoras 3D para vincular cálculos de depreciação, consumo de energia e ordens de produção."
-          actionLabel="Adicionar impressora"
-          onAction={openCreate}
-        />
+      {sortedPrinters.length === 0 ? (
+        isSectionLoading ? (
+          <LoadingState label="Carregando impressoras do Firestore..." />
+        ) : (
+          <EmptyState
+            icon={<PrinterIcon className="w-6 h-6" />}
+            title="Nenhuma impressora cadastrada"
+            description="Adicione suas impressoras 3D para vincular cálculos de depreciação, consumo de energia e ordens de produção."
+            actionLabel="Adicionar impressora"
+            onAction={openCreate}
+          />
+        )
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {printers.map((p) => {
+          {sortedPrinters.map((p) => {
             const analytics = printerAnalytics.get(p.id) || {
               jobsCount: 0,
               failedCount: 0,

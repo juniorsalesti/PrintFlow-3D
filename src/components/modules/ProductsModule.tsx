@@ -29,6 +29,7 @@ import {
   DurationInput,
   EmptyState,
   LoadingButton,
+  LoadingState,
   Modal,
   StatusText,
   inputClass,
@@ -57,7 +58,8 @@ const emptyProductForm = {
 };
 
 export const ProductsModule: React.FC = () => {
-  const { tenant, products, printers, settings, orders, productionJobs, showToast } = useErp();
+  const { tenant, products, printers, settings, orders, productionJobs, isSectionLoading, showToast } =
+    useErp();
 
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<'todos' | 'ativo' | 'inativo'>('todos');
@@ -142,14 +144,18 @@ export const ProductsModule: React.FC = () => {
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !tenant) return;
+    if (!file) return;
+    if (!tenant) {
+      showToast('Sessão da empresa não inicializada. Recarregue a página.', 'error');
+      return;
+    }
     setUploadingPhoto(true);
     try {
       const { url } = await uploadCompanyFile(tenant.companyId, 'products', file);
       setForm((prev) => ({ ...prev, photoUrls: [...prev.photoUrls, url].slice(0, 8) }));
       showToast('Foto enviada ao Firebase Storage.');
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao enviar foto.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao enviar foto.'), 'error');
     } finally {
       setUploadingPhoto(false);
       e.target.value = '';
@@ -158,14 +164,18 @@ export const ProductsModule: React.FC = () => {
 
   const handleModelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !tenant) return;
+    if (!file) return;
+    if (!tenant) {
+      showToast('Sessão da empresa não inicializada. Recarregue a página.', 'error');
+      return;
+    }
     setUploadingModel(true);
     try {
       const { url, fileName } = await uploadCompanyFile(tenant.companyId, 'models', file);
       setForm((prev) => ({ ...prev, modelFileUrl: url, modelFileName: fileName }));
       showToast(`Arquivo ${fileName} enviado com sucesso.`);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao enviar arquivo 3D.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao enviar arquivo 3D.'), 'error');
     } finally {
       setUploadingModel(false);
       e.target.value = '';
@@ -288,13 +298,17 @@ export const ProductsModule: React.FC = () => {
 
       {/* Product Grid */}
       {filteredProducts.length === 0 ? (
-        <EmptyState
-          icon={<Package className="w-6 h-6" />}
-          title="Nenhum produto cadastrado"
-          description="Cadastre itens do catálogo ou peças personalizadas com peso, tempo estimado, arquivo STL/3MF, custo e preço de venda."
-          actionLabel="Cadastrar primeiro produto"
-          onAction={openCreate}
-        />
+        isSectionLoading && products.length === 0 ? (
+          <LoadingState label="Carregando produtos do Firestore..." />
+        ) : (
+          <EmptyState
+            icon={<Package className="w-6 h-6" />}
+            title="Nenhum produto cadastrado"
+            description="Cadastre itens do catálogo ou peças personalizadas com peso, tempo estimado, arquivo STL/3MF, custo e preço de venda."
+            actionLabel="Cadastrar primeiro produto"
+            onAction={openCreate}
+          />
+        )
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {filteredProducts.map((p) => {

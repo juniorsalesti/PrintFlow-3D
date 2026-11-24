@@ -1,13 +1,15 @@
 import React, { useMemo, useState } from 'react';
 import { Edit2, Plus, Search, Trash2, Truck } from 'lucide-react';
 import { useErp } from '../../context/ErpContext';
+import { formatFirestoreErrorMessage } from '../../lib/firebase';
 import { deleteSupplier, saveSupplier } from '../../services/erpService';
 import type { Supplier } from '../../types/erp';
-import { formatBRL } from '../../utils/formatters';
+import { formatBRL, toDateObject } from '../../utils/formatters';
 import {
   ConfirmModal,
   EmptyState,
   LoadingButton,
+  LoadingState,
   Modal,
   inputClass,
   labelClass,
@@ -25,7 +27,7 @@ const emptySupplierForm = {
 };
 
 export const SuppliersModule: React.FC = () => {
-  const { tenant, suppliers, purchases, showToast } = useErp();
+  const { tenant, suppliers, purchases, isSectionLoading, showToast } = useErp();
 
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
@@ -37,13 +39,19 @@ export const SuppliersModule: React.FC = () => {
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return suppliers;
-    return suppliers.filter(
-      (s) =>
-        s.name.toLowerCase().includes(term) ||
-        s.contactName.toLowerCase().includes(term) ||
-        s.document.toLowerCase().includes(term)
-    );
+    const list = !term
+      ? [...suppliers]
+      : suppliers.filter(
+          (s) =>
+            s.name.toLowerCase().includes(term) ||
+            s.contactName.toLowerCase().includes(term) ||
+            s.document.toLowerCase().includes(term)
+        );
+    return list.sort((a, b) => {
+      const da = toDateObject(a.createdAt)?.getTime() || 0;
+      const db = toDateObject(b.createdAt)?.getTime() || 0;
+      return db - da;
+    });
   }, [suppliers, search]);
 
   const openCreate = () => {
@@ -69,7 +77,10 @@ export const SuppliersModule: React.FC = () => {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant) return;
+    if (!tenant) {
+      showToast('Sessão da empresa não inicializada. Recarregue a página.', 'error');
+      return;
+    }
     if (!form.name.trim()) {
       showToast('Informe o nome do fornecedor.', 'error');
       return;
@@ -80,7 +91,7 @@ export const SuppliersModule: React.FC = () => {
       showToast(editing ? 'Fornecedor atualizado.' : 'Fornecedor cadastrado.');
       setModalOpen(false);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao salvar fornecedor.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao salvar fornecedor.'), 'error');
     } finally {
       setSaving(false);
     }
@@ -94,7 +105,7 @@ export const SuppliersModule: React.FC = () => {
       showToast('Fornecedor removido.');
       setDeleteTarget(null);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao excluir.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao excluir fornecedor.'), 'error');
     } finally {
       setDeleting(false);
     }
@@ -124,13 +135,17 @@ export const SuppliersModule: React.FC = () => {
       </div>
 
       {filtered.length === 0 ? (
-        <EmptyState
-          icon={<Truck className="w-6 h-6" />}
-          title="Nenhum fornecedor cadastrado"
-          description="Cadastre seus fornecedores de filamentos, bicos, peças de reposição e embalagens para controlar suas compras."
-          actionLabel="Cadastrar fornecedor"
-          onAction={openCreate}
-        />
+        isSectionLoading && suppliers.length === 0 ? (
+          <LoadingState label="Carregando fornecedores do banco de dados..." />
+        ) : (
+          <EmptyState
+            icon={<Truck className="w-6 h-6" />}
+            title="Nenhum fornecedor cadastrado"
+            description="Cadastre seus fornecedores de filamentos, bicos, peças de reposição e embalagens para controlar suas compras."
+            actionLabel="Cadastrar fornecedor"
+            onAction={openCreate}
+          />
+        )
       ) : (
         <div className="bg-[#1D2027] border border-[#282C35] rounded-xl overflow-hidden">
           <div className="overflow-x-auto">

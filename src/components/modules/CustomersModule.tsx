@@ -22,6 +22,7 @@ import {
   EmptyState,
   KpiCard,
   LoadingButton,
+  LoadingState,
   Modal,
   StatusText,
   inputClass,
@@ -51,6 +52,7 @@ export const CustomersModule: React.FC = () => {
     quickActionTrigger,
     triggerQuickAction,
     setActiveSection,
+    isSectionLoading,
     showToast,
   } = useErp();
 
@@ -190,7 +192,7 @@ export const CustomersModule: React.FC = () => {
       if (selectedCustomerId === deleteTarget.id) setSelectedCustomerId(null);
       setDeleteTarget(null);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao remover cliente.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao remover cliente.'), 'error');
     } finally {
       setDeleting(false);
     }
@@ -398,17 +400,21 @@ export const CustomersModule: React.FC = () => {
 
       {/* Customer List */}
       {filteredCustomers.length === 0 ? (
-        <EmptyState
-          icon={<Users className="w-6 h-6" />}
-          title={search ? 'Nenhum cliente encontrado' : 'Nenhum cliente cadastrado'}
-          description={
-            search
-              ? 'Tente ajustar o termo pesquisado ou limpe o filtro.'
-              : 'Cadastre seus primeiros clientes para vincular orçamentos, pedidos e histórico financeiro.'
-          }
-          actionLabel={!search ? 'Cadastrar primeiro cliente' : undefined}
-          onAction={!search ? openCreateModal : undefined}
-        />
+        isSectionLoading && customers.length === 0 ? (
+          <LoadingState label="Carregando clientes do Firestore..." />
+        ) : (
+          <EmptyState
+            icon={<Users className="w-6 h-6" />}
+            title={search ? 'Nenhum cliente encontrado' : 'Nenhum cliente cadastrado'}
+            description={
+              search
+                ? 'Tente ajustar o termo pesquisado ou limpe o filtro.'
+                : 'Cadastre seus primeiros clientes para vincular orçamentos, pedidos e histórico financeiro.'
+            }
+            actionLabel={!search ? 'Cadastrar primeiro cliente' : undefined}
+            onAction={!search ? openCreateModal : undefined}
+          />
+        )
       ) : (
         <div className="bg-[#1D2027] border border-[#282C35] rounded-xl overflow-hidden">
           <div className="overflow-x-auto">

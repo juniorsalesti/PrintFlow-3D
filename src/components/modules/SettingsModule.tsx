@@ -11,6 +11,7 @@ import {
   Users,
 } from 'lucide-react';
 import { useErp } from '../../context/ErpContext';
+import { formatFirestoreErrorMessage } from '../../lib/firebase';
 import {
   deleteCompanyMember,
   saveCompanyMember,
@@ -24,6 +25,7 @@ import {
   ConfirmModal,
   EmptyState,
   LoadingButton,
+  LoadingState,
   Modal,
   StatusText,
   inputClass,
@@ -55,7 +57,7 @@ const ROLE_LABELS: Record<UserRole, string> = {
 };
 
 export const SettingsModule: React.FC = () => {
-  const { tenant, company, settings, members, showToast } = useErp();
+  const { tenant, company, settings, members, isSectionLoading, showToast } = useErp();
 
   const [tab, setTab] = useState<'empresa' | 'operacional' | 'materiais' | 'equipe'>('empresa');
 
@@ -141,7 +143,11 @@ export const SettingsModule: React.FC = () => {
 
   const handleUploadLogo = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !tenant) return;
+    if (!file) return;
+    if (!tenant) {
+      showToast('Sessão da empresa não inicializada. Recarregue a página.', 'error');
+      return;
+    }
     setUploadingLogo(true);
     try {
       const { url } = await uploadCompanyFile(tenant.companyId, 'company', file);
@@ -149,12 +155,7 @@ export const SettingsModule: React.FC = () => {
       await updateCompanyInfo(tenant.companyId, { logoUrl: url });
       showToast('Logotipo enviado e atualizado com sucesso.');
     } catch (err) {
-      showToast(
-        err instanceof Error
-          ? `Erro ao enviar logotipo: ${err.message}`
-          : 'Erro ao enviar arquivo para o Storage.',
-        'error'
-      );
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao enviar arquivo para o Storage.'), 'error');
     } finally {
       setUploadingLogo(false);
     }
@@ -162,7 +163,10 @@ export const SettingsModule: React.FC = () => {
 
   const handleSaveCompany = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant) return;
+    if (!tenant) {
+      showToast('Sessão da empresa não inicializada. Recarregue a página.', 'error');
+      return;
+    }
     if (!companyForm.name.trim()) {
       showToast('O nome da empresa é obrigatório.', 'error');
       return;
@@ -179,7 +183,7 @@ export const SettingsModule: React.FC = () => {
       });
       showToast('Dados da empresa atualizados.');
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao salvar empresa.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao salvar empresa.'), 'error');
     } finally {
       setSavingCompany(false);
     }
@@ -187,7 +191,10 @@ export const SettingsModule: React.FC = () => {
 
   const handleSaveOperational = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant) return;
+    if (!tenant) {
+      showToast('Sessão da empresa não inicializada. Recarregue a página.', 'error');
+      return;
+    }
     if (opForm.defaultProfitMargin >= 100 || opForm.defaultPaymentFeePercent >= 100) {
       showToast('Margem padrão e taxa de pagamento devem ser menores que 100%.', 'error');
       return;
@@ -205,7 +212,7 @@ export const SettingsModule: React.FC = () => {
       });
       showToast('Parâmetros operacionais e de precificação salvos.');
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao salvar configurações.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao salvar configurações.'), 'error');
     } finally {
       setSavingOp(false);
     }
@@ -271,7 +278,10 @@ export const SettingsModule: React.FC = () => {
   };
 
   const handleSaveLists = async () => {
-    if (!tenant) return;
+    if (!tenant) {
+      showToast('Sessão da empresa não inicializada. Recarregue a página.', 'error');
+      return;
+    }
     setSavingLists(true);
     try {
       await updateCompanySettings(tenant.companyId, {
@@ -281,7 +291,7 @@ export const SettingsModule: React.FC = () => {
       });
       showToast('Materiais, densidades e categorias financeiras atualizados.');
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao atualizar listas.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao atualizar listas.'), 'error');
     } finally {
       setSavingLists(false);
     }
@@ -322,7 +332,10 @@ export const SettingsModule: React.FC = () => {
 
   const handleSaveMember = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant) return;
+    if (!tenant) {
+      showToast('Sessão da empresa não inicializada. Recarregue a página.', 'error');
+      return;
+    }
     if (!memberForm.name.trim() || !memberForm.email.trim()) {
       showToast('Nome e e-mail do colaborador são obrigatórios.', 'error');
       return;
@@ -343,21 +356,25 @@ export const SettingsModule: React.FC = () => {
       showToast(editingMember ? 'Membro atualizado.' : 'Membro adicionado à equipe.');
       setMemberModalOpen(false);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao salvar membro.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao salvar membro.'), 'error');
     } finally {
       setSavingMember(false);
     }
   };
 
   const handleDeleteMember = async () => {
-    if (!tenant || !deleteMemberTarget) return;
+    if (!tenant) {
+      showToast('Sessão da empresa não inicializada. Recarregue a página.', 'error');
+      return;
+    }
+    if (!deleteMemberTarget) return;
     setDeletingMember(true);
     try {
       await deleteCompanyMember(tenant.companyId, deleteMemberTarget.id);
       showToast('Colaborador removido.');
       setDeleteMemberTarget(null);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Erro ao remover colaborador.', 'error');
+      showToast(formatFirestoreErrorMessage(err, 'Erro ao remover colaborador.'), 'error');
     } finally {
       setDeletingMember(false);
     }
@@ -523,7 +540,7 @@ export const SettingsModule: React.FC = () => {
               <label className={labelClass}>Tarifa de energia elétrica (R$ / kWh)</label>
               <input
                 type="number"
-                step="0.01"
+                step="any"
                 min="0"
                 value={opForm.energyTariffPerKwh}
                 onChange={(e) =>
@@ -536,7 +553,7 @@ export const SettingsModule: React.FC = () => {
               <label className={labelClass}>Margem de lucro padrão sobre venda (%)</label>
               <input
                 type="number"
-                step="0.1"
+                step="any"
                 min="0"
                 max="99"
                 value={opForm.defaultProfitMargin}
@@ -550,7 +567,7 @@ export const SettingsModule: React.FC = () => {
               <label className={labelClass}>Taxa de pagamento padrão (%)</label>
               <input
                 type="number"
-                step="0.1"
+                step="any"
                 min="0"
                 max="99"
                 value={opForm.defaultPaymentFeePercent}
@@ -564,7 +581,7 @@ export const SettingsModule: React.FC = () => {
               <label className={labelClass}>Valor hora de mão de obra (R$/h)</label>
               <input
                 type="number"
-                step="0.5"
+                step="any"
                 min="0"
                 value={opForm.defaultHourlyLaborRate}
                 onChange={(e) =>
@@ -577,7 +594,7 @@ export const SettingsModule: React.FC = () => {
               <label className={labelClass}>Custo padrão de embalagem (R$)</label>
               <input
                 type="number"
-                step="0.5"
+                step="any"
                 min="0"
                 value={opForm.defaultPackagingCost}
                 onChange={(e) =>
@@ -590,7 +607,7 @@ export const SettingsModule: React.FC = () => {
               <label className={labelClass}>Alerta global de estoque mínimo (g)</label>
               <input
                 type="number"
-                step="10"
+                step="any"
                 min="0"
                 value={opForm.lowStockThresholdGrams}
                 onChange={(e) =>
@@ -811,13 +828,17 @@ export const SettingsModule: React.FC = () => {
 
           <div className="bg-[#1D2027] border border-[#282C35] rounded-xl overflow-hidden">
             {members.length === 0 ? (
-              <EmptyState
-                icon={<Users className="w-6 h-6" />}
-                title="Nenhum colaborador adicional cadastrado"
-                description="Adicione operadores ou gestores para controlar responsabilidades e permissões de acesso."
-                actionLabel="Adicionar usuário"
-                onAction={openNewMember}
-              />
+              isSectionLoading ? (
+                <LoadingState label="Carregando equipe do banco de dados..." />
+              ) : (
+                <EmptyState
+                  icon={<Users className="w-6 h-6" />}
+                  title="Nenhum colaborador adicional cadastrado"
+                  description="Adicione operadores ou gestores para controlar responsabilidades e permissões de acesso."
+                  actionLabel="Adicionar usuário"
+                  onAction={openNewMember}
+                />
+              )
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
