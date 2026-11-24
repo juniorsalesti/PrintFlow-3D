@@ -1,6 +1,12 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebase/auth';
-import { auth, googleProvider } from '../lib/firebase';
+import {
+  auth,
+  checkAuthorizedDomain,
+  firebaseAuthConsoleUrl,
+  googleProvider,
+  type DomainAuthorizationCheck,
+} from '../lib/firebase';
 import {
   ensureCompanyBootstrap,
   subscribeCompanyCollection,
@@ -58,6 +64,8 @@ interface ErpContextValue {
   authReady: boolean;
   bootstrapping: boolean;
   authError: string | null;
+  domainStatus: DomainAuthorizationCheck;
+  recheckAuthorizedDomain: () => Promise<DomainAuthorizationCheck>;
   signInWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
   profile: UserProfile | null;
@@ -99,6 +107,12 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [authReady, setAuthReady] = useState(false);
   const [bootstrapping, setBootstrapping] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [domainStatus, setDomainStatus] = useState<DomainAuthorizationCheck>({
+    checked: false,
+    authorized: true,
+    currentHost: typeof window !== 'undefined' ? window.location.hostname : '',
+    consoleUrl: firebaseAuthConsoleUrl,
+  });
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [company, setCompany] = useState<Company | null>(null);
@@ -141,16 +155,47 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setQuickActionTrigger(action);
   }, []);
 
+  const recheckAuthorizedDomain = useCallback(async (): Promise<DomainAuthorizationCheck> => {
+    const result = await checkAuthorizedDomain();
+    setDomainStatus(result);
+    if (result.checked && result.authorized) {
+      setAuthError((prev) =>
+        prev && prev.includes('Domínio não autorizado') ? null : prev
+      );
+    }
+    return result;
+  }, []);
+
+  useEffect(() => {
+    if (!user) {
+      void recheckAuthorizedDomain();
+    }
+  }, [user, recheckAuthorizedDomain]);
+
   const signInWithGoogle = useCallback(async () => {
     setAuthError(null);
     try {
       await signInWithPopup(auth, googleProvider);
+      if (typeof window !== 'undefined') {
+        window.sessionStorage.removeItem('pf3d_auth_reload_once');
+      }
     } catch (err) {
       const rawMsg = err instanceof Error ? err.message : 'Erro ao autenticar com o Google.';
       let friendlyMsg = rawMsg;
       if (rawMsg.includes('auth/unauthorized-domain')) {
-        const currentHost = typeof window !== 'undefined' ? window.location.hostname : '';
-        friendlyMsg = `Domínio não autorizado no Firebase Auth (${currentHost}). Caso o erro persista ao atualizar a página, adicione "${currentHost}" em Firebase Console > Authentication > Configurações > Domínios autorizados.`;
+        const status = await recheckAuthorizedDomain();
+        const currentHost = status.currentHost || (typeof window !== 'undefined' ? window.location.hostname : '');
+        if (status.checked && status.authorized && typeof window !== 'undefined') {
+          const alreadyReloaded = window.sessionStorage.getItem('pf3d_auth_reload_once') === '1';
+          if (!alreadyReloaded) {
+            window.sessionStorage.setItem('pf3d_auth_reload_once', '1');
+            window.location.reload();
+            return;
+          }
+          friendlyMsg = `O domínio "${currentHost}" já consta como autorizado no Firebase. Atualize a página (Ctrl+F5) e tente entrar novamente.`;
+        } else {
+          friendlyMsg = `Domínio "${currentHost}" não está autorizado no Firebase Auth. Copie este domínio e adicione-o em Firebase Console > Authentication > Configurações > Domínios autorizados.`;
+        }
       } else if (rawMsg.includes('auth/popup-blocked')) {
         friendlyMsg = 'O pop-up de login foi bloqueado pelo navegador. Libere os pop-ups para este site e tente novamente.';
       } else if (rawMsg.includes('auth/popup-closed-by-user')) {
@@ -159,7 +204,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setAuthError(friendlyMsg);
       showToast(friendlyMsg, 'error');
     }
-  }, [showToast]);
+  }, [recheckAuthorizedDomain, showToast]);
 
   const logout = useCallback(async () => {
     await signOut(auth);
@@ -382,6 +427,8 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     authReady,
     bootstrapping,
     authError,
+    domainStatus,
+    recheckAuthorizedDomain,
     signInWithGoogle,
     logout,
     profile,

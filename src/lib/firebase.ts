@@ -11,6 +11,48 @@ export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
+export const firebaseProjectId = firebaseConfig.projectId;
+export const firebaseAuthConsoleUrl = `https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/settings`;
+
+function matchesAuthorizedDomain(hostname: string, pattern: string): boolean {
+  if (!hostname || !pattern) return false;
+  if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(pattern)) {
+    return hostname === pattern;
+  }
+  const escaped = pattern.replace(/\./g, '\\.');
+  const regex = new RegExp(`^(.+\\.${escaped}|${escaped})$`, 'i');
+  return regex.test(hostname);
+}
+
+export interface DomainAuthorizationCheck {
+  checked: boolean;
+  authorized: boolean;
+  currentHost: string;
+  consoleUrl: string;
+}
+
+export async function checkAuthorizedDomain(): Promise<DomainAuthorizationCheck> {
+  const currentHost = typeof window !== 'undefined' ? window.location.hostname : '';
+  const consoleUrl = firebaseAuthConsoleUrl;
+  if (!currentHost || !firebaseConfig.apiKey) {
+    return { checked: false, authorized: true, currentHost, consoleUrl };
+  }
+  try {
+    const res = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/projects?key=${encodeURIComponent(firebaseConfig.apiKey)}`
+    );
+    if (!res.ok) {
+      return { checked: false, authorized: true, currentHost, consoleUrl };
+    }
+    const data = (await res.json()) as { authorizedDomains?: string[] };
+    const domains = Array.isArray(data.authorizedDomains) ? data.authorizedDomains : [];
+    const authorized = domains.some((domain) => matchesAuthorizedDomain(currentHost, domain));
+    return { checked: true, authorized, currentHost, consoleUrl };
+  } catch {
+    return { checked: false, authorized: true, currentHost, consoleUrl };
+  }
+}
+
 export enum OperationType {
   CREATE = 'create',
   UPDATE = 'update',

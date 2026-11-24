@@ -1,10 +1,25 @@
 import React, { useState } from 'react';
-import { Layers, Loader2, ShieldCheck, Printer, Calculator, BarChart3 } from 'lucide-react';
+import {
+  AlertTriangle,
+  BarChart3,
+  Calculator,
+  Check,
+  Copy,
+  ExternalLink,
+  Layers,
+  Loader2,
+  Printer,
+  RefreshCw,
+  ShieldCheck,
+} from 'lucide-react';
 import { useErp } from '../../context/ErpContext';
 
 export const LoginScreen: React.FC = () => {
-  const { signInWithGoogle, authError, bootstrapping } = useErp();
+  const { signInWithGoogle, authError, bootstrapping, domainStatus, recheckAuthorizedDomain, showToast } =
+    useErp();
   const [signingIn, setSigningIn] = useState(false);
+  const [checkingDomain, setCheckingDomain] = useState(false);
+  const [copiedHost, setCopiedHost] = useState(false);
 
   const handleLogin = async () => {
     setSigningIn(true);
@@ -12,6 +27,32 @@ export const LoginScreen: React.FC = () => {
       await signInWithGoogle();
     } finally {
       setSigningIn(false);
+    }
+  };
+
+  const handleCopyHost = async () => {
+    if (!domainStatus.currentHost) return;
+    try {
+      await navigator.clipboard.writeText(domainStatus.currentHost);
+      setCopiedHost(true);
+      showToast('Domínio copiado para a área de transferência.', 'info');
+      setTimeout(() => setCopiedHost(false), 2500);
+    } catch {
+      showToast('Não foi possível copiar automaticamente. Selecione e copie o domínio.', 'error');
+    }
+  };
+
+  const handleRecheckDomain = async () => {
+    setCheckingDomain(true);
+    try {
+      const res = await recheckAuthorizedDomain();
+      if (res.authorized) {
+        showToast('Domínio autorizado confirmado! Você já pode entrar com o Google.', 'success');
+      } else {
+        showToast(`O domínio "${res.currentHost}" ainda não consta nos domínios autorizados.`, 'error');
+      }
+    } finally {
+      setCheckingDomain(false);
     }
   };
 
@@ -82,8 +123,69 @@ export const LoginScreen: React.FC = () => {
             </p>
           </div>
 
+          {domainStatus.checked && !domainStatus.authorized && (
+            <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-3 text-xs">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-semibold text-amber-200">
+                    Domínio atual precisa ser autorizado no Firebase
+                  </p>
+                  <p className="text-amber-100/80 leading-relaxed">
+                    Para fazer login com Google neste endereço, adicione o domínio abaixo em{' '}
+                    <strong>Authentication &gt; Configurações &gt; Domínios autorizados</strong>:
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 bg-[#101114] border border-[#282C35] rounded-lg px-3 py-2">
+                <code className="flex-1 text-[11px] font-mono text-[#F5F5F5] break-all select-all">
+                  {domainStatus.currentHost}
+                </code>
+                <button
+                  type="button"
+                  onClick={handleCopyHost}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#1D2027] hover:bg-[#282C35] text-[#F5F5F5] font-medium transition-colors cursor-pointer shrink-0"
+                >
+                  {copiedHost ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Copiado</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copiar</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <a
+                  href={domainStatus.consoleUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 font-medium transition-colors"
+                >
+                  <span>Abrir Firebase Console</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+                <button
+                  type="button"
+                  onClick={handleRecheckDomain}
+                  disabled={checkingDomain}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1D2027] hover:bg-[#282C35] border border-[#282C35] text-[#F5F5F5] font-medium transition-colors cursor-pointer disabled:opacity-60"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${checkingDomain ? 'animate-spin' : ''}`} />
+                  <span>{checkingDomain ? 'Verificando...' : 'Verificar novamente'}</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {authError && (
-            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-300">
+            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-300 leading-relaxed">
               {authError}
             </div>
           )}
