@@ -146,9 +146,18 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Erro ao autenticar com o Google.';
-      setAuthError(msg);
-      showToast('Falha ao entrar com Google. Verifique o bloqueador de pop-ups.', 'error');
+      const rawMsg = err instanceof Error ? err.message : 'Erro ao autenticar com o Google.';
+      let friendlyMsg = rawMsg;
+      if (rawMsg.includes('auth/unauthorized-domain')) {
+        const currentHost = typeof window !== 'undefined' ? window.location.hostname : '';
+        friendlyMsg = `Domínio não autorizado no Firebase Auth (${currentHost}). Caso o erro persista ao atualizar a página, adicione "${currentHost}" em Firebase Console > Authentication > Configurações > Domínios autorizados.`;
+      } else if (rawMsg.includes('auth/popup-blocked')) {
+        friendlyMsg = 'O pop-up de login foi bloqueado pelo navegador. Libere os pop-ups para este site e tente novamente.';
+      } else if (rawMsg.includes('auth/popup-closed-by-user')) {
+        friendlyMsg = 'A janela de login do Google foi fechada antes da conclusão.';
+      }
+      setAuthError(friendlyMsg);
+      showToast(friendlyMsg, 'error');
     }
   }, [showToast]);
 
